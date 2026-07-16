@@ -1,16 +1,24 @@
 import {
+  EventDetailSchema,
   EventListQuerySchema,
   EventPageSchema,
   EventSearchQuerySchema,
   EventSearchResultSchema,
+  FileChangeListQuerySchema,
+  FileChangePageSchema,
   IdentifierSchema,
   SessionDetailSchema,
   SessionListQuerySchema,
   SessionPageSchema,
+  WorkspaceFileChangeSummarySchema,
+  type BlobReference,
+  type EventDetail,
   type EventListQueryInput,
   type EventPage,
   type EventSearchQueryInput,
   type EventSearchResult,
+  type FileChangeListQueryInput,
+  type FileChangePage,
   type SessionDetail,
   type SessionListQueryInput,
   type SessionPage,
@@ -27,6 +35,30 @@ export class EvidenceQueryNotFoundError extends Error {
     );
     this.name = "EvidenceQueryNotFoundError";
   }
+}
+
+export class EvidencePayloadTooLargeError extends Error {
+  constructor(
+    readonly reference: BlobReference,
+    readonly maximumBytes: number,
+  ) {
+    super(
+      `Payload ${reference.id} is ${reference.byteLength} bytes; the query limit is ${maximumBytes} bytes.`,
+    );
+    this.name = "EvidencePayloadTooLargeError";
+  }
+}
+
+export interface EvidencePayload {
+  readonly reference: BlobReference;
+  readonly bytes: Uint8Array;
+}
+
+function literalFtsQuery(query: string): string {
+  return query
+    .split(/\s+/u)
+    .map((term) => `"${term.replaceAll('"', '""')}"`)
+    .join(" AND ");
 }
 
 export class EvidenceQueryService {
@@ -78,6 +110,49 @@ export class EvidenceQueryService {
     });
   }
 
+  getEvent(eventId: string): EventDetail {
+    const id = IdentifierSchema.parse(eventId);
+    const event = this.storage.events.get(id);
+    if (event === undefined) {
+      throw new EvidenceQueryNotFoundError("event", id);
+    }
+    const parsedChange = event.type.startsWith("file.")
+      ? WorkspaceFileChangeSummarySchema.safeParse(event.summary)
+      : undefined;
+    return EventDetailSchema.parse({
+      schemaVersion: 1,
+      event,
+      ...(parsedChange?.success === true
+        ? { fileChange: parsedChange.data }
+        : {}),
+    });
+  }
+
+  listFileChanges(
+    sessionId: string,
+    input: FileChangeListQueryInput = {},
+  ): FileChangePage {
+    const { session } = this.getSession(sessionId);
+    const query = FileChangeListQuerySchema.parse(input);
+    const page = this.storage.events.list(session.id, {
+      limit: query.limit,
+      source: "filesystem",
+      typePrefix: "file.",
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    return FileChangePageSchema.parse({
+      schemaVersion: 1,
+      sessionId: session.id,
+      changes: page.events.map((event) => {
+        const change = WorkspaceFileChangeSummarySchema.safeParse(
+          event.summary,
+        );
+        return { event, change: change.success ? change.data : null };
+      }),
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    });
+  }
+
   searchEvents(
     sessionId: string,
     input: EventSearchQueryInput,
@@ -88,7 +163,29 @@ export class EvidenceQueryService {
       schemaVersion: 1,
       sessionId: session.id,
       query: query.query,
-      events: this.storage.events.search(session.id, query.query, query.limit),
+      events: this.storage.events.search(
+        session.id,
+        literalFtsQuery(query.query),
+        query.limit,
+      ),
     });
+  }
+
+  async getPayload(
+    payloadId: string,
+    maximumBytes: number,
+  ): Promise<EvidencePayload> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+      throw new RangeError("Maximum query payload bytes must be positive.");
+    }
+    const id = IdentifierSchema.parse(payloadId);
+    const reference = this.storage.blobs.describe(id);
+    if (reference === undefined) {
+      throw new EvidenceQueryNotFoundError("payload", id);
+    }
+    if (reference.byteLength > maximumBytes) {
+      throw new EvidencePayloadTooLargeError(reference, maximumBytes);
+    }
+    return { reference, bytes: await this.storage.blobs.get(id) };
   }
 }

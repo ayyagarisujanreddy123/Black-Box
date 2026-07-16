@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import type { ProxyConfigurationInput } from "../proxy/config.js";
 import { RecorderProxy } from "../proxy/recorder-proxy.js";
+import { EvidenceQueryService } from "../query/evidence-query-service.js";
 import { ControlServer } from "./control-server.js";
 import { ensureControlToken } from "./control-token.js";
 import { DaemonLock, type DaemonLockRecovery } from "./daemon-lock.js";
@@ -180,6 +181,7 @@ export class BlackBoxDaemon {
         token,
         status: () => this.status(),
         shutdown: () => this.stop(),
+        query: new EvidenceQueryService(this.storageValue),
         ...this.options.control,
       });
       const controlAddress = await this.controlValue.start();

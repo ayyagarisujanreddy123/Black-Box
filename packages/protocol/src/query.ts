@@ -7,6 +7,7 @@ import {
   SchemaVersionSchema,
 } from "./common.js";
 import { BlackBoxEventSchema } from "./event.js";
+import { WorkspaceFileChangeSummarySchema } from "./process.js";
 import { SessionSchema } from "./session.js";
 
 export const QueryCursorSchema = z.string().min(1).max(4096);
@@ -65,6 +66,37 @@ export const EventPageSchema = z
   })
   .strict();
 
+export const EventDetailSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    event: BlackBoxEventSchema,
+    fileChange: WorkspaceFileChangeSummarySchema.optional(),
+  })
+  .strict();
+
+export const FileChangeListQuerySchema = z
+  .object({
+    limit: QueryLimitSchema.default(100),
+    cursor: QueryCursorSchema.optional(),
+  })
+  .strict();
+
+export const FileChangeItemSchema = z
+  .object({
+    event: BlackBoxEventSchema,
+    change: WorkspaceFileChangeSummarySchema.nullable(),
+  })
+  .strict();
+
+export const FileChangePageSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    sessionId: IdentifierSchema,
+    changes: z.array(FileChangeItemSchema),
+    nextCursor: QueryCursorSchema.optional(),
+  })
+  .strict();
+
 export const EventSearchQuerySchema = z
   .object({
     query: z.string().trim().min(1).max(1024),
@@ -98,10 +130,16 @@ export const QueryErrorSchema = z
 
 export type EventListQuery = z.infer<typeof EventListQuerySchema>;
 export type EventListQueryInput = z.input<typeof EventListQuerySchema>;
+export type EventDetail = z.infer<typeof EventDetailSchema>;
 export type EventPage = z.infer<typeof EventPageSchema>;
 export type EventSearchQuery = z.infer<typeof EventSearchQuerySchema>;
 export type EventSearchQueryInput = z.input<typeof EventSearchQuerySchema>;
 export type EventSearchResult = z.infer<typeof EventSearchResultSchema>;
+export type FileChangeListQuery = z.infer<typeof FileChangeListQuerySchema>;
+export type FileChangeListQueryInput = z.input<
+  typeof FileChangeListQuerySchema
+>;
+export type FileChangePage = z.infer<typeof FileChangePageSchema>;
 export type QueryError = z.infer<typeof QueryErrorSchema>;
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;
 export type SessionListQuery = z.infer<typeof SessionListQuerySchema>;

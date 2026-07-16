@@ -39,6 +39,7 @@ export interface EventListOptions {
   readonly source?: EvidenceSource;
   readonly occurredAfter?: string;
   readonly occurredBefore?: string;
+  readonly typePrefix?: string;
 }
 
 export interface NormalizationInput {
@@ -274,6 +275,7 @@ export class EventRepository {
            AND (@source IS NULL OR source = @source)
            AND (@occurredAfter IS NULL OR occurred_at >= @occurredAfter)
            AND (@occurredBefore IS NULL OR occurred_at <= @occurredBefore)
+           AND (@typePrefix IS NULL OR type LIKE @typePrefix)
          ORDER BY sequence ASC, id ASC
          LIMIT @fetchLimit`,
       )
@@ -285,6 +287,8 @@ export class EventRepository {
         source: options.source ?? null,
         occurredAfter: options.occurredAfter ?? null,
         occurredBefore: options.occurredBefore ?? null,
+        typePrefix:
+          options.typePrefix === undefined ? null : `${options.typePrefix}%`,
         fetchLimit: limit + 1,
       }) as EventRow[];
     const hasMore = rows.length > limit;

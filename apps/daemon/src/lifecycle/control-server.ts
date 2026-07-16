@@ -10,6 +10,9 @@ import type { AddressInfo } from "node:net";
 import { z } from "zod";
 
 import { isLoopbackHost } from "../proxy/config.js";
+import type { EvidenceQueryService } from "../query/evidence-query-service.js";
+import { EvidenceQueryRouter } from "../query/evidence-query-router.js";
+import { sendJson } from "../query/http-response.js";
 import { ControlTokenSchema } from "./control-token.js";
 import type { DaemonStatus } from "./status.js";
 
@@ -22,6 +25,8 @@ export interface ControlServerOptions {
   readonly listenHost?: string;
   readonly listenPort?: number;
   readonly allowedOrigins?: readonly string[];
+  readonly query?: EvidenceQueryService;
+  readonly maximumQueryPayloadBytes?: number;
 }
 
 export interface ControlAddress {
@@ -67,30 +72,12 @@ function tokenMatches(header: string | undefined, expected: string): boolean {
   );
 }
 
-function sendJson(
-  response: ServerResponse,
-  status: number,
-  value: unknown,
-  extraHeaders: Record<string, string> = {},
-): void {
-  const body = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
-  response.writeHead(status, {
-    "cache-control": "no-store",
-    "content-security-policy":
-      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-    "content-type": "application/json; charset=utf-8",
-    "content-length": body.length,
-    "x-content-type-options": "nosniff",
-    ...extraHeaders,
-  });
-  response.end(body);
-}
-
 export class ControlServer {
   private readonly server: Server;
   private readonly allowedOrigins: ReadonlySet<string>;
   private addressValue?: ControlAddress;
   private shutdownRequested = false;
+  private readonly queryRouter: EvidenceQueryRouter | undefined;
 
   constructor(private readonly options: ControlServerOptions) {
     ControlTokenSchema.parse(options.token);
@@ -102,6 +89,16 @@ export class ControlServer {
     this.allowedOrigins = new Set(
       (options.allowedOrigins ?? []).map(normalizeAllowedOrigin),
     );
+    this.queryRouter =
+      options.query === undefined
+        ? undefined
+        : new EvidenceQueryRouter({
+            query: options.query,
+            status: options.status,
+            ...(options.maximumQueryPayloadBytes === undefined
+              ? {}
+              : { maximumPayloadBytes: options.maximumQueryPayloadBytes }),
+          });
     this.server = createServer((request, response) => {
       void this.handle(request, response).catch(() => {
         if (!response.headersSent) {
@@ -240,8 +237,14 @@ export class ControlServer {
       return;
     }
 
-    const path = new URL(request.url ?? "/", "http://blackbox.invalid")
-      .pathname;
+    const url = new URL(request.url ?? "/", "http://blackbox.invalid");
+    const path = url.pathname;
+    if (
+      this.queryRouter !== undefined &&
+      (await this.queryRouter.handle(request, response, url))
+    ) {
+      return;
+    }
     if (path === "/v1/control/status") {
       request.resume();
       if (request.method !== "GET") {

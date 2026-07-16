@@ -389,6 +389,11 @@ describe("daemon lifecycle integration", () => {
     );
     expect(JSON.parse(remoteStatus.body)).toEqual(status);
     expect(remoteStatus.body).not.toContain(token);
+    const health = await controlRequest(status.controlOrigin, "/v1/health", {
+      token,
+    });
+    expect(health.status).toBe(200);
+    expect(JSON.parse(health.body)).toEqual(status);
 
     const shutdown = await controlRequest(
       status.controlOrigin,

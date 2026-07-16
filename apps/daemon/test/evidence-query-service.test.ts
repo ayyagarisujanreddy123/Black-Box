@@ -153,6 +153,18 @@ describe("evidence query service", () => {
         .searchEvents("session-newest", { query: "needle" })
         .events.map((value) => value.id),
     ).toEqual(["event-file", "event-late"]);
+    expect(
+      service
+        .searchEvents("session-newest", { query: 'needle "response"' })
+        .events.map((value) => value.id),
+    ).toEqual(["event-late"]);
+    expect(service.getEvent("event-file")).toMatchObject({
+      event: { id: "event-file" },
+    });
+    expect(service.getEvent("event-file").fileChange).toBeUndefined();
+    expect(service.listFileChanges("session-newest").changes).toMatchObject([
+      { event: { id: "event-file" }, change: null },
+    ]);
     expect(() => service.getSession("session-missing")).toThrow(
       EvidenceQueryNotFoundError,
     );

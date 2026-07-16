@@ -224,9 +224,9 @@ export class RecorderProxy {
     await Promise.all([...this.pendingJournals]);
   }
 
-  async close(): Promise<void> {
+  async close(graceMilliseconds = 5_000): Promise<void> {
     if (this.server.listening) {
-      await new Promise<void>((resolve, reject) => {
+      const closePromise = new Promise<void>((resolve, reject) => {
         this.server.close((error) => {
           if (error === undefined) {
             resolve();
@@ -235,6 +235,15 @@ export class RecorderProxy {
           }
         });
       });
+      const timer = setTimeout(() => {
+        this.server.closeAllConnections();
+      }, graceMilliseconds);
+      timer.unref();
+      try {
+        await closePromise;
+      } finally {
+        clearTimeout(timer);
+      }
     }
     delete this.addressValue;
     await this.flush();

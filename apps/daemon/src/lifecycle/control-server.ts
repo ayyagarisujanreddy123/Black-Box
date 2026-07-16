@@ -1,0 +1,290 @@
+import { timingSafeEqual } from "node:crypto";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import type { AddressInfo } from "node:net";
+
+import { z } from "zod";
+
+import { isLoopbackHost } from "../proxy/config.js";
+import { ControlTokenSchema } from "./control-token.js";
+import type { DaemonStatus } from "./status.js";
+
+const ControlPortSchema = z.number().int().min(0).max(65_535);
+
+export interface ControlServerOptions {
+  readonly token: string;
+  readonly status: () => DaemonStatus | Promise<DaemonStatus>;
+  readonly shutdown: () => void | Promise<void>;
+  readonly listenHost?: string;
+  readonly listenPort?: number;
+  readonly allowedOrigins?: readonly string[];
+}
+
+export interface ControlAddress {
+  readonly host: string;
+  readonly port: number;
+  readonly origin: string;
+}
+
+export class UnsafeControlBindError extends Error {
+  constructor(host: string) {
+    super(`The daemon control API may only bind to loopback, not ${host}.`);
+    this.name = "UnsafeControlBindError";
+  }
+}
+
+function normalizeAllowedOrigin(origin: string): string {
+  const parsed = new URL(origin);
+  if (
+    !new Set(["http:", "https:"]).has(parsed.protocol) ||
+    !isLoopbackHost(parsed.hostname) ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error(
+      `Control origin must be a loopback HTTP(S) origin: ${origin}`,
+    );
+  }
+  return parsed.origin;
+}
+
+function tokenMatches(header: string | undefined, expected: string): boolean {
+  if (header === undefined || !header.startsWith("Bearer ")) {
+    return false;
+  }
+  const candidate = Buffer.from(header.slice("Bearer ".length), "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return (
+    candidate.length === expectedBytes.length &&
+    timingSafeEqual(candidate, expectedBytes)
+  );
+}
+
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  value: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const body = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+  response.writeHead(status, {
+    "cache-control": "no-store",
+    "content-security-policy":
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "content-type": "application/json; charset=utf-8",
+    "content-length": body.length,
+    "x-content-type-options": "nosniff",
+    ...extraHeaders,
+  });
+  response.end(body);
+}
+
+export class ControlServer {
+  private readonly server: Server;
+  private readonly allowedOrigins: ReadonlySet<string>;
+  private addressValue?: ControlAddress;
+  private shutdownRequested = false;
+
+  constructor(private readonly options: ControlServerOptions) {
+    ControlTokenSchema.parse(options.token);
+    const listenHost = options.listenHost ?? "127.0.0.1";
+    if (!isLoopbackHost(listenHost)) {
+      throw new UnsafeControlBindError(listenHost);
+    }
+    ControlPortSchema.parse(options.listenPort ?? 4142);
+    this.allowedOrigins = new Set(
+      (options.allowedOrigins ?? []).map(normalizeAllowedOrigin),
+    );
+    this.server = createServer((request, response) => {
+      void this.handle(request, response).catch(() => {
+        if (!response.headersSent) {
+          sendJson(response, 500, { error: "internal_control_error" });
+        } else {
+          response.destroy();
+        }
+      });
+    });
+    this.server.requestTimeout = 15_000;
+    this.server.headersTimeout = 10_000;
+    this.server.keepAliveTimeout = 2_000;
+    this.server.maxHeadersCount = 100;
+  }
+
+  async start(): Promise<ControlAddress> {
+    if (this.addressValue !== undefined) {
+      return this.addressValue;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        this.server.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        this.server.off("error", onError);
+        resolve();
+      };
+      this.server.once("error", onError);
+      this.server.once("listening", onListening);
+      this.server.listen(
+        this.options.listenPort ?? 4142,
+        this.options.listenHost ?? "127.0.0.1",
+      );
+    });
+    const address = this.server.address() as AddressInfo;
+    const displayHost =
+      address.family === "IPv6" ? `[${address.address}]` : address.address;
+    this.addressValue = {
+      host: address.address,
+      port: address.port,
+      origin: `http://${displayHost}:${address.port}`,
+    };
+    return this.addressValue;
+  }
+
+  address(): ControlAddress | undefined {
+    return this.addressValue;
+  }
+
+  async close(graceMilliseconds = 1_000): Promise<void> {
+    if (!this.server.listening) {
+      delete this.addressValue;
+      return;
+    }
+    const closePromise = new Promise<void>((resolve, reject) => {
+      this.server.close((error) => {
+        if (error === undefined) {
+          resolve();
+        } else {
+          reject(error);
+        }
+      });
+    });
+    const timer = setTimeout(() => {
+      this.server.closeAllConnections();
+    }, graceMilliseconds);
+    timer.unref();
+    try {
+      await closePromise;
+    } finally {
+      clearTimeout(timer);
+      delete this.addressValue;
+    }
+  }
+
+  private requestHostIsSafe(request: IncomingMessage): boolean {
+    const address = this.addressValue;
+    const host = request.headers.host;
+    if (address === undefined || host === undefined) {
+      return false;
+    }
+    try {
+      const parsed = new URL(`http://${host}`);
+      const port = parsed.port === "" ? 80 : Number(parsed.port);
+      return (
+        isLoopbackHost(parsed.hostname) &&
+        port === address.port &&
+        parsed.username === "" &&
+        parsed.password === "" &&
+        parsed.pathname === "/" &&
+        parsed.search === "" &&
+        parsed.hash === ""
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private requestOriginIsSafe(request: IncomingMessage): boolean {
+    const origin = request.headers.origin;
+    if (origin === undefined) {
+      return true;
+    }
+    try {
+      const normalized = normalizeAllowedOrigin(origin);
+      return (
+        normalized === this.addressValue?.origin ||
+        this.allowedOrigins.has(normalized)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    if (!tokenMatches(request.headers.authorization, this.options.token)) {
+      request.resume();
+      sendJson(
+        response,
+        401,
+        { error: "unauthorized" },
+        { "www-authenticate": "Bearer" },
+      );
+      return;
+    }
+    if (
+      !this.requestHostIsSafe(request) ||
+      !this.requestOriginIsSafe(request)
+    ) {
+      request.resume();
+      sendJson(response, 403, { error: "forbidden_origin" });
+      return;
+    }
+
+    const path = new URL(request.url ?? "/", "http://blackbox.invalid")
+      .pathname;
+    if (path === "/v1/control/status") {
+      request.resume();
+      if (request.method !== "GET") {
+        sendJson(
+          response,
+          405,
+          { error: "method_not_allowed" },
+          { allow: "GET" },
+        );
+        return;
+      }
+      sendJson(response, 200, await this.options.status());
+      return;
+    }
+    if (path === "/v1/control/shutdown") {
+      request.resume();
+      if (request.method !== "POST") {
+        sendJson(
+          response,
+          405,
+          { error: "method_not_allowed" },
+          { allow: "POST" },
+        );
+        return;
+      }
+      if (this.shutdownRequested) {
+        sendJson(
+          response,
+          202,
+          { status: "stopping" },
+          { connection: "close" },
+        );
+        return;
+      }
+      this.shutdownRequested = true;
+      sendJson(response, 202, { status: "stopping" }, { connection: "close" });
+      setImmediate(() => {
+        void Promise.resolve(this.options.shutdown()).catch(() => undefined);
+      });
+      return;
+    }
+
+    request.resume();
+    sendJson(response, 404, { error: "not_found" });
+  }
+}

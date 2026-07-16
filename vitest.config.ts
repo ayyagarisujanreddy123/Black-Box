@@ -14,6 +14,9 @@ export default defineConfig({
       "@blackbox/storage": fileURLToPath(
         new URL("./packages/storage/src/index.ts", import.meta.url),
       ),
+      "@blackbox/test-fixtures": fileURLToPath(
+        new URL("./packages/test-fixtures/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {

@@ -8,5 +8,8 @@
   "dependencies": {
     "@blackbox/protocol": "0.0.0",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@blackbox/test-fixtures": "0.0.0"
   }
 }

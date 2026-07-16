@@ -6,5 +6,9 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../daemon" }, { "path": "../../packages/storage" }]
+  "references": [
+    { "path": "../daemon" },
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/storage" }
+  ]
 }

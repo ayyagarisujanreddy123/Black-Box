@@ -543,3 +543,4 @@ export * from "./configuration.js";
 export * from "./control-client.js";
 export * from "./daemon-launcher.js";
 export * from "./doctor.js";
+export * from "./run/run-event-journal.js";

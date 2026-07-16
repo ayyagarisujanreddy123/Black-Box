@@ -77,6 +77,54 @@ export const WorkspaceBaselineSchema = z
   })
   .strict();
 
+export const WorkspaceManifestEntrySchema = z
+  .object({
+    path: z.string().min(1),
+    kind: z.enum(["file", "symlink"]),
+    byteLength: z.number().int().nonnegative(),
+    mode: z.number().int().nonnegative(),
+    modifiedAt: IsoTimestampSchema,
+    sha256: Sha256Schema,
+    tracked: z.boolean(),
+  })
+  .strict();
+
+export const WorkspaceManifestSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    root: z.string().min(1),
+    capturedAt: IsoTimestampSchema,
+    entries: z.array(WorkspaceManifestEntrySchema),
+  })
+  .strict();
+
+export const WorkspaceSnapshotSummarySchema = WorkspaceBaselineSchema.extend({
+  phase: z.enum(["baseline", "final"]),
+  fileCount: z.number().int().nonnegative(),
+  capturedContentBytes: z.number().int().nonnegative(),
+  changedFileCount: z.number().int().nonnegative().optional(),
+  incompleteReasons: z.array(z.string().min(1)),
+}).strict();
+
+export const WorkspaceFileChangeSummarySchema = z
+  .object({
+    path: z.string().min(1),
+    operation: z.enum(["create", "modify", "delete", "rename"]),
+    previousPath: z.string().min(1).optional(),
+    beforeHash: Sha256Schema.optional(),
+    afterHash: Sha256Schema.optional(),
+    beforeByteLength: z.number().int().nonnegative().optional(),
+    afterByteLength: z.number().int().nonnegative().optional(),
+    timingPrecision: z.enum([
+      "exact-adapter",
+      "approximate-watcher",
+      "exact-final-diff",
+    ]),
+    sensitivity: z.enum(["normal", "sensitive", "secret", "truncated"]),
+    payloadKind: z.enum(["git-binary-patch", "file-delta"]).optional(),
+  })
+  .strict();
+
 export const ProcessObservationIdentitySchema = z
   .object({
     schemaVersion: SchemaVersionSchema,
@@ -101,3 +149,13 @@ export type ProcessRunConfiguration = z.infer<
 >;
 export type ProcessStartedSummary = z.infer<typeof ProcessStartedSummarySchema>;
 export type WorkspaceBaseline = z.infer<typeof WorkspaceBaselineSchema>;
+export type WorkspaceFileChangeSummary = z.infer<
+  typeof WorkspaceFileChangeSummarySchema
+>;
+export type WorkspaceManifest = z.infer<typeof WorkspaceManifestSchema>;
+export type WorkspaceManifestEntry = z.infer<
+  typeof WorkspaceManifestEntrySchema
+>;
+export type WorkspaceSnapshotSummary = z.infer<
+  typeof WorkspaceSnapshotSummarySchema
+>;

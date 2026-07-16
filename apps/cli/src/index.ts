@@ -39,6 +39,7 @@ import {
   DEFAULT_PROCESS_RUN_CONFIGURATION,
   RunEventJournal,
 } from "./run/run-event-journal.js";
+import { WorkspaceObserver } from "./run/workspace-observer.js";
 
 const HELP = `Black Box — the flight recorder for AI coding agents
 
@@ -78,6 +79,7 @@ Inspection options:
 Run options:
   --cwd PATH                      Child working directory (default current directory)
   --max-output-frame-bytes N      Maximum stored stdout/stderr frame (default 262144)
+  --max-untracked-file-bytes N    Maximum stored content per changed file (default 1048576)
 `;
 
 export interface CliOutput {
@@ -356,14 +358,40 @@ async function commandRun(
         1,
         1024 * 1024,
       ),
+      maxUntrackedFileBytes: integerFlag(
+        parsed.flags,
+        "max-untracked-file-bytes",
+        DEFAULT_PROCESS_RUN_CONFIGURATION.maxUntrackedFileBytes,
+        0,
+        1024 * 1024 * 1024,
+      ),
     },
   });
   let recordingFailure: unknown;
+  let workspaceObserver: WorkspaceObserver | undefined;
   const observe = (operation: Promise<void>) => {
     void operation.catch((error: unknown) => {
       recordingFailure ??= error;
     });
   };
+
+  try {
+    workspaceObserver = await WorkspaceObserver.start({
+      cwd,
+      dataDirectory: configuration.paths.homeDirectory,
+      configuration: journal.identity.configuration,
+      now: runtime.now,
+    });
+    await journal.recordWorkspaceSnapshot(workspaceObserver.baseline);
+  } catch (error: unknown) {
+    recordingFailure ??= error;
+    await journal
+      .recordWorkspaceError("baseline", error, runtime.now().toISOString())
+      .catch((journalError: unknown) => {
+        recordingFailure ??= journalError;
+      });
+    workspaceObserver = undefined;
+  }
 
   try {
     let child: ReturnType<typeof spawn>;
@@ -460,6 +488,23 @@ async function commandRun(
         `blackbox: failed to spawn ${executable}: ${errorMessage(result.error)}\n`,
       );
       return 127;
+    }
+
+    if (workspaceObserver !== undefined) {
+      try {
+        const workspace = await workspaceObserver.complete();
+        for (const change of workspace.changes) {
+          await journal.recordFileChange(change);
+        }
+        await journal.recordWorkspaceSnapshot(workspace.snapshot);
+      } catch (error: unknown) {
+        recordingFailure ??= error;
+        await journal
+          .recordWorkspaceError("final", error, runtime.now().toISOString())
+          .catch((journalError: unknown) => {
+            recordingFailure ??= journalError;
+          });
+      }
     }
 
     await journal
@@ -769,3 +814,4 @@ export * from "./control-client.js";
 export * from "./daemon-launcher.js";
 export * from "./doctor.js";
 export * from "./run/run-event-journal.js";
+export * from "./run/workspace-observer.js";

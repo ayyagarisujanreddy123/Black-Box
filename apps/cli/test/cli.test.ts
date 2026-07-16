@@ -1,5 +1,12 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -258,6 +265,7 @@ describe("CLI daemon lifecycle", () => {
 
   it("runs a child in one proxy/process session and returns its exit code", async () => {
     const root = await temporaryRoot();
+    const workspace = await temporaryRoot();
     const upstreamOrigin = await upstream();
     const stdout = new CapturedOutput();
     const stderr = new CapturedOutput();
@@ -286,6 +294,7 @@ describe("CLI daemon lifecycle", () => {
           body: JSON.stringify({ model: "fixture", input: "wrapped" })
         });
         const body = await response.text();
+        require("node:fs").writeFileSync("agent-output.txt", "created by child\\n");
         process.stdout.write(JSON.stringify({
           base: process.env.OPENAI_BASE_URL,
           session: process.env.BLACKBOX_SESSION_ID,
@@ -311,6 +320,8 @@ describe("CLI daemon lifecycle", () => {
         "0",
         "--control-port",
         "0",
+        "--cwd",
+        workspace,
         "--",
         process.execPath,
         "-e",
@@ -355,7 +366,8 @@ describe("CLI daemon lifecycle", () => {
       expect(session).toMatchObject({
         captureLevel: "wrapped-process",
         status: "completed",
-        command: { executable: process.execPath },
+        command: { executable: process.execPath, cwd: workspace },
+        repoRoot: await realpath(workspace),
       });
       expect(events.map((event) => event.type)).toEqual(
         expect.arrayContaining([
@@ -366,8 +378,26 @@ describe("CLI daemon lifecycle", () => {
           "process.exited",
           "session.ended",
           "model.response.completed",
+          "workspace.snapshot",
+          "file.create",
         ]),
       );
+      const fileEvent = events.find((event) => event.type === "file.create");
+      expect(fileEvent).toMatchObject({
+        source: "filesystem",
+        summary: {
+          path: "agent-output.txt",
+          operation: "create",
+          payloadKind: "file-delta",
+        },
+      });
+      expect(
+        storage.fileChanges.getByEvent(fileEvent?.id as string),
+      ).toMatchObject({
+        path: "agent-output.txt",
+        operation: "create",
+        patchBlobId: fileEvent?.payloadRef?.id,
+      });
       const rawRow = storage.unsafeDatabase
         .prepare("SELECT id FROM raw_exchanges WHERE session_id = ?")
         .get(childOutput.session) as { id: string };

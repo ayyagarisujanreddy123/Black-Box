@@ -63,6 +63,7 @@ const VALUE_FLAGS = new Set([
   "cursor",
   "cwd",
   "max-output-frame-bytes",
+  "max-untracked-file-bytes",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -127,6 +128,7 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
     "allow-non-loopback",
     "cwd",
     "max-output-frame-bytes",
+    "max-untracked-file-bytes",
   ]),
 };
 

@@ -141,4 +141,132 @@ describe("durable process event journal", () => {
       counts: { events: 3, errors: 2 },
     });
   });
+
+  it("links filesystem events, manifests, and file change records", async () => {
+    const storage = await testStorage();
+    const journal = new RunEventJournal(storage, {
+      schemaVersion: 1,
+      sessionId: "session-run-workspace",
+      executable: process.execPath,
+      arguments: [],
+      cwd: process.cwd(),
+      startedAt: STARTED_AT,
+      configuration: DEFAULT_PROCESS_RUN_CONFIGURATION,
+    });
+    const beforeHash = "a".repeat(64);
+    const afterHash = "b".repeat(64);
+    const baselineEntry = {
+      path: "fixture.txt",
+      kind: "file" as const,
+      byteLength: 6,
+      mode: 0o100644,
+      modifiedAt: STARTED_AT,
+      sha256: beforeHash,
+      tracked: true,
+    };
+
+    await journal.recordWorkspaceSnapshot({
+      summary: {
+        schemaVersion: 1,
+        kind: "git",
+        cwd: process.cwd(),
+        root: process.cwd(),
+        capturedAt: STARTED_AT,
+        gitHead: "c".repeat(40),
+        statusSha256: "d".repeat(64),
+        phase: "baseline",
+        fileCount: 1,
+        capturedContentBytes: 6,
+        incompleteReasons: [],
+      },
+      manifest: {
+        schemaVersion: 1,
+        root: process.cwd(),
+        capturedAt: STARTED_AT,
+        entries: [baselineEntry],
+      },
+    });
+    await journal.recordStarted(4321, STARTED_AT);
+    await journal.recordFileChange({
+      summary: {
+        path: "fixture.txt",
+        operation: "modify",
+        beforeHash,
+        afterHash,
+        beforeByteLength: 6,
+        afterByteLength: 5,
+        timingPrecision: "exact-final-diff",
+        sensitivity: "normal",
+        payloadKind: "file-delta",
+      },
+      observedAt: ENDED_AT,
+      payload: Buffer.from('{"delta":true}'),
+      mediaType: "application/vnd.blackbox.file-delta+json",
+    });
+    await journal.recordWorkspaceSnapshot({
+      summary: {
+        schemaVersion: 1,
+        kind: "git",
+        cwd: process.cwd(),
+        root: process.cwd(),
+        capturedAt: ENDED_AT,
+        gitHead: "c".repeat(40),
+        statusSha256: "e".repeat(64),
+        phase: "final",
+        fileCount: 1,
+        capturedContentBytes: 5,
+        changedFileCount: 1,
+        incompleteReasons: [],
+      },
+      manifest: {
+        schemaVersion: 1,
+        root: process.cwd(),
+        capturedAt: ENDED_AT,
+        entries: [
+          {
+            ...baselineEntry,
+            byteLength: 5,
+            modifiedAt: ENDED_AT,
+            sha256: afterHash,
+          },
+        ],
+      },
+    });
+    await journal.finish({ exitCode: 0, signal: null, endedAt: ENDED_AT });
+
+    const events = storage.events.list("session-run-workspace").events;
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "workspace.snapshot",
+      "process.started",
+      "file.modify",
+      "workspace.snapshot",
+      "process.exited",
+      "session.ended",
+    ]);
+    const fileEvent = events.find((event) => event.type === "file.modify");
+    expect(fileEvent).toMatchObject({
+      source: "filesystem",
+      evidence: "derived",
+      summary: { beforeHash, afterHash },
+    });
+    expect(
+      storage.fileChanges.getByEvent(fileEvent?.id as string),
+    ).toMatchObject({
+      path: "fixture.txt",
+      operation: "modify",
+      beforeHash,
+      afterHash,
+      patchBlobId: fileEvent?.payloadRef?.id,
+    });
+    expect(storage.sessions.getRequired("session-run-workspace")).toMatchObject(
+      {
+        repoRoot: process.cwd(),
+        metadata: {
+          workspaceBaseline: { phase: "baseline" },
+          workspaceFinal: { phase: "final", changedFileCount: 1 },
+        },
+      },
+    );
+  });
 });

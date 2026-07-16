@@ -8,9 +8,17 @@ import {
   ProcessOutputSummarySchema,
   ProcessStartedSummarySchema,
   SessionSchema,
+  WorkspaceFileChangeSummarySchema,
+  WorkspaceManifestSchema,
+  WorkspaceSnapshotSummarySchema,
   type BlackBoxEvent,
+  type EvidenceKind,
+  type EvidenceSource,
   type ProcessObservationIdentity,
   type ProcessOutputStream,
+  type WorkspaceFileChangeSummary,
+  type WorkspaceManifest,
+  type WorkspaceSnapshotSummary,
 } from "@blackbox/protocol";
 import type { BlackBoxStorage } from "@blackbox/storage";
 
@@ -43,6 +51,24 @@ export interface ProcessSpawnFailure {
   readonly failedAt: string;
 }
 
+export interface WorkspaceSnapshotEvidence {
+  readonly summary: WorkspaceSnapshotSummary;
+  readonly manifest: WorkspaceManifest;
+}
+
+export interface WorkspaceFileChangeEvidence {
+  readonly summary: WorkspaceFileChangeSummary;
+  readonly observedAt: string;
+  readonly payload?: Uint8Array;
+  readonly mediaType?: string;
+}
+
+interface EventOptions {
+  readonly payloadRef?: BlackBoxEvent["payloadRef"];
+  readonly source?: EvidenceSource;
+  readonly evidence?: EvidenceKind;
+}
+
 function eventId(sessionId: string, sequence: number): string {
   const candidate = `event-${sessionId}-${sequence}`;
   if (candidate.length <= 512) {
@@ -69,6 +95,8 @@ export class RunEventJournal {
   private pending: Promise<void> = Promise.resolve();
   private pid?: number;
   private terminal = false;
+  private workspaceBaselineRecorded = false;
+  private workspaceFinalRecorded = false;
 
   constructor(
     private readonly storage: BlackBoxStorage,
@@ -162,8 +190,153 @@ export class RunEventJournal {
           encoding: frameEncoding(frame),
           truncated: false,
         });
-        this.insertEvent(`process.${stream}`, summary, observedAt, payloadRef);
+        this.insertEvent(`process.${stream}`, summary, observedAt, {
+          payloadRef,
+        });
       }
+    });
+  }
+
+  recordWorkspaceSnapshot(input: WorkspaceSnapshotEvidence): Promise<void> {
+    if (this.terminal) {
+      throw new Error("Workspace snapshots cannot follow a terminal event.");
+    }
+    const summary = WorkspaceSnapshotSummarySchema.parse(input.summary);
+    const manifest = WorkspaceManifestSchema.parse(input.manifest);
+    if (
+      summary.root !== manifest.root ||
+      summary.capturedAt !== manifest.capturedAt ||
+      summary.fileCount !== manifest.entries.length
+    ) {
+      throw new Error(
+        "Workspace snapshot summary does not match its manifest.",
+      );
+    }
+    if (summary.phase === "baseline") {
+      if (this.workspaceBaselineRecorded) {
+        throw new Error("Workspace baseline may only be recorded once.");
+      }
+      this.workspaceBaselineRecorded = true;
+    } else {
+      if (!this.workspaceBaselineRecorded || this.workspaceFinalRecorded) {
+        throw new Error(
+          "Workspace final snapshot requires exactly one recorded baseline.",
+        );
+      }
+      this.workspaceFinalRecorded = true;
+    }
+    const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
+    return this.enqueue(async () => {
+      const payloadRef = await this.storage.blobs.put(bytes, {
+        mediaType: "application/vnd.blackbox.workspace-manifest+json",
+      });
+      this.storage.transaction(() => {
+        this.insertEvent("workspace.snapshot", summary, summary.capturedAt, {
+          payloadRef,
+          source: "filesystem",
+        });
+        const session = this.storage.sessions.getRequired(
+          this.identity.sessionId,
+        );
+        const metadataKey =
+          summary.phase === "baseline" ? "workspaceBaseline" : "workspaceFinal";
+        this.storage.sessions.replace(
+          SessionSchema.parse({
+            ...session,
+            repoRoot: summary.root,
+            metadata: {
+              ...session.metadata,
+              [metadataKey]: summary,
+            },
+          }),
+          summary.capturedAt,
+        );
+      });
+    });
+  }
+
+  recordFileChange(input: WorkspaceFileChangeEvidence): Promise<void> {
+    if (
+      this.terminal ||
+      !this.workspaceBaselineRecorded ||
+      this.workspaceFinalRecorded
+    ) {
+      throw new Error(
+        "File changes require a baseline and must precede the final snapshot.",
+      );
+    }
+    const summary = WorkspaceFileChangeSummarySchema.parse(input.summary);
+    const payload =
+      input.payload === undefined ? undefined : Buffer.from(input.payload);
+    if (
+      (payload === undefined) !== (input.mediaType === undefined) ||
+      (payload === undefined) !== (summary.payloadKind === undefined)
+    ) {
+      throw new Error(
+        "File change payload, media type, and payload kind must be supplied together.",
+      );
+    }
+    const payloadEvidence =
+      payload === undefined || input.mediaType === undefined
+        ? undefined
+        : { bytes: payload, mediaType: input.mediaType };
+    return this.enqueue(async () => {
+      const payloadRef =
+        payloadEvidence === undefined
+          ? undefined
+          : await this.storage.blobs.put(payloadEvidence.bytes, {
+              mediaType: payloadEvidence.mediaType,
+            });
+      this.storage.transaction(() => {
+        const event = this.insertEvent(
+          `file.${summary.operation}`,
+          summary,
+          input.observedAt,
+          {
+            ...(payloadRef === undefined ? {} : { payloadRef }),
+            source: "filesystem",
+            evidence: "derived",
+          },
+        );
+        this.storage.fileChanges.insert({
+          schemaVersion: 1,
+          eventId: event.id,
+          path: summary.path,
+          operation: summary.operation,
+          ...(summary.previousPath === undefined
+            ? {}
+            : { previousPath: summary.previousPath }),
+          ...(summary.beforeHash === undefined
+            ? {}
+            : { beforeHash: summary.beforeHash }),
+          ...(summary.afterHash === undefined
+            ? {}
+            : { afterHash: summary.afterHash }),
+          ...(payloadRef === undefined ? {} : { patchBlobId: payloadRef.id }),
+          timingPrecision: summary.timingPrecision,
+          sensitivity: summary.sensitivity,
+        });
+      });
+    });
+  }
+
+  recordWorkspaceError(
+    phase: "baseline" | "final",
+    error: unknown,
+    observedAt: string,
+  ): Promise<void> {
+    if (this.terminal) {
+      throw new Error("Workspace errors cannot follow a terminal event.");
+    }
+    const message =
+      error instanceof Error ? error.message : String(error || "Unknown error");
+    return this.enqueue(() => {
+      this.insertEvent(
+        "workspace.error",
+        { phase, message: message.slice(0, 4096) },
+        observedAt,
+        { source: "filesystem" },
+      );
     });
   }
 
@@ -224,7 +397,7 @@ export class RunEventJournal {
     type: string,
     summary: BlackBoxEvent["summary"],
     observedAt: string,
-    payloadRef?: BlackBoxEvent["payloadRef"],
+    options: EventOptions = {},
   ): BlackBoxEvent {
     const sequence = this.storage.sequences.reserve(this.identity.sessionId)[0];
     if (sequence === undefined) {
@@ -240,10 +413,12 @@ export class RunEventJournal {
         sequence,
         occurredAt: observedAt,
         observedAt,
-        source: "process",
+        source: options.source ?? "process",
         type,
-        evidence: "observed",
-        ...(payloadRef === undefined ? {} : { payloadRef }),
+        evidence: options.evidence ?? "observed",
+        ...(options.payloadRef === undefined
+          ? {}
+          : { payloadRef: options.payloadRef }),
         summary,
         redaction: NO_REDACTION,
       }),

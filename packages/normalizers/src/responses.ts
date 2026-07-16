@@ -8,6 +8,7 @@ import {
   type NormalizationResult,
   type ParserDiagnostic,
 } from "./contracts.js";
+import { SseReplayDetector } from "./duplicates.js";
 import { materializeCanonicalEvents } from "./events.js";
 import { decodeSseChunks, type SseFrame } from "./sse.js";
 
@@ -476,12 +477,14 @@ function normalizeSse(
   const parserId = "openai.responses.sse";
   const diagnostics: ParserDiagnostic[] = [];
   const parserErrors: CanonicalEventDraft[] = [];
+  const duplicateErrors: CanonicalEventDraft[] = [];
   const started: CanonicalEventDraft[] = [];
   const terminal: CanonicalEventDraft[] = [];
   const unknown: CanonicalEventDraft[] = [];
   const texts = new Map<string, string>();
   const functions = new Map<string, FunctionAssembly>();
   let usage: ReportedUsage | undefined;
+  const replayDetector = new SseReplayDetector();
 
   let frames: readonly SseFrame[] = [];
   let incompleteIndex: number | undefined;
@@ -524,6 +527,14 @@ function normalizeSse(
       continue;
     }
     const type = stringValue(payload.type) ?? frame.event;
+    const replay = replayDetector.observe(frame, payload, type);
+    if (replay.kind !== "accept") {
+      diagnostics.push(replay.diagnostic);
+      if (replay.kind === "conflict") {
+        duplicateErrors.push(parserErrorDraft(parserId, frame.index));
+      }
+      continue;
+    }
     if (type === undefined) {
       unknown.push({
         type: "provider.event.unknown",
@@ -767,19 +778,21 @@ function normalizeSse(
   const drafts = hasParserErrors
     ? [
         ...parserErrors,
+        ...duplicateErrors,
         ...semantic.filter(
           (draft) =>
             draft.type === "model.response.completed" ||
             draft.type === "transport.error",
         ),
       ]
-    : semantic;
+    : [...duplicateErrors, ...semantic];
   return NormalizationResultSchema.parse({
     parserId,
     parserVersion: RESPONSES_NORMALIZER_VERSION,
     status:
       diagnostics.some(
         (entry) =>
+          entry.fatal ||
           entry.kind === "malformed-sse" ||
           entry.kind === "incomplete-sse" ||
           entry.kind === "invalid-payload",

@@ -1,8 +1,12 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   BlackBoxEventSchema,
+  RawExchangeParseStatusSchema,
   RawExchangeSchema,
   type BlackBoxEvent,
   type RawExchange,
+  type RawExchangeParseStatus,
 } from "@blackbox/protocol";
 import type Database from "better-sqlite3";
 
@@ -37,12 +41,18 @@ export interface NormalizationInput {
   readonly exchangeId: string;
   readonly parserVersion: string;
   readonly events: readonly BlackBoxEvent[];
+  readonly parseStatus?: Exclude<RawExchangeParseStatus, "pending">;
   readonly completedAt?: string;
 }
 
 export interface NormalizationResult {
   readonly inserted: boolean;
   readonly eventIds: readonly string[];
+}
+
+export interface StoredNormalization {
+  readonly parserVersion: string;
+  readonly events: readonly BlackBoxEvent[];
 }
 
 interface EventCursor {
@@ -114,6 +124,11 @@ export class EventRepository {
     const events = input.events.map((event) =>
       BlackBoxEventSchema.parse(event),
     );
+    const parseStatus: RawExchangeParseStatus =
+      RawExchangeParseStatusSchema.parse(input.parseStatus ?? "parsed");
+    if (parseStatus === "pending") {
+      throw new RangeError("A completed normalization cannot remain pending.");
+    }
     const existing = this.getNormalizationRow(
       input.exchangeId,
       input.parserVersion,
@@ -129,13 +144,24 @@ export class EventRepository {
         );
       }
 
-      const existingEventIds = JSON.parse(existing.event_ids_json) as string[];
+      const existingEventIds = this.parseEventIds(existing.event_ids_json);
       const requestedEventIds = events.map((event) => event.id);
       if (
         JSON.stringify(existingEventIds) !== JSON.stringify(requestedEventIds)
       ) {
         throw new StorageIntegrityError(
           `Parser ${input.parserVersion} produced conflicting events for exchange ${input.exchangeId}.`,
+        );
+      }
+      const storedEvents = this.getStoredEvents(existingEventIds);
+      if (
+        storedEvents.length !== events.length ||
+        storedEvents.some(
+          (event, index) => !isDeepStrictEqual(event, events[index]),
+        )
+      ) {
+        throw new StorageIntegrityError(
+          `Parser ${input.parserVersion} changed canonical event content for exchange ${input.exchangeId}.`,
         );
       }
 
@@ -181,15 +207,20 @@ export class EventRepository {
 
       const updatedRaw = RawExchangeSchema.parse({
         ...exchange,
-        parseStatus: "parsed",
+        parseStatus,
       });
       this.database
         .prepare(
           `UPDATE raw_exchanges
-           SET parse_status = 'parsed', record_json = ?, updated_at = ?
+           SET parse_status = ?, record_json = ?, updated_at = ?
            WHERE id = ?`,
         )
-        .run(JSON.stringify(updatedRaw), completedAt, input.exchangeId);
+        .run(
+          parseStatus,
+          JSON.stringify(updatedRaw),
+          completedAt,
+          input.exchangeId,
+        );
     })();
 
     return { inserted: true, eventIds: events.map((event) => event.id) };
@@ -200,6 +231,20 @@ export class EventRepository {
       .prepare("SELECT record_json FROM events WHERE id = ?")
       .get(id) as EventRow | undefined;
     return row === undefined ? undefined : parseEventRow(row);
+  }
+
+  getNormalization(
+    exchangeId: string,
+    parserVersion: string,
+  ): StoredNormalization | undefined {
+    const row = this.getNormalizationRow(exchangeId, parserVersion);
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      parserVersion,
+      events: this.getStoredEvents(this.parseEventIds(row.event_ids_json)),
+    };
   }
 
   count(sessionId: string): number {
@@ -381,5 +426,43 @@ export class EventRepository {
          WHERE exchange_id = ? AND parser_version = ?`,
       )
       .get(exchangeId, parserVersion) as NormalizationRow | undefined;
+  }
+
+  private parseEventIds(value: string): string[] {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (
+        !Array.isArray(parsed) ||
+        parsed.some((id) => typeof id !== "string" || id.length === 0)
+      ) {
+        throw new TypeError("event ID list is invalid");
+      }
+      return parsed;
+    } catch (error: unknown) {
+      throw new StorageIntegrityError(
+        "A normalization run contains an invalid event ID list.",
+        { cause: error },
+      );
+    }
+  }
+
+  private getStoredEvents(eventIds: readonly string[]): BlackBoxEvent[] {
+    return eventIds.map((eventId) => {
+      try {
+        const event = this.get(eventId);
+        if (event === undefined) {
+          throw new Error(`Event ${eventId} is missing.`);
+        }
+        return event;
+      } catch (error: unknown) {
+        if (error instanceof StorageIntegrityError) {
+          throw error;
+        }
+        throw new StorageIntegrityError(
+          `Normalization event ${eventId} is missing or corrupt.`,
+          { cause: error },
+        );
+      }
+    });
   }
 }

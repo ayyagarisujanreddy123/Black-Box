@@ -50,6 +50,7 @@ export const ParserDiagnosticSchema = z
       "malformed-sse",
       "incomplete-sse",
       "invalid-payload",
+      "duplicate-replay",
       "duplicate-conflict",
       "unsupported-event",
       "capture-incomplete",

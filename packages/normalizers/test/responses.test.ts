@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  DefaultNormalizerRegistry,
   NormalizationExchangeSchema,
   RESPONSES_NORMALIZER_VERSION,
   ResponsesNormalizer,
@@ -156,5 +157,64 @@ describe("OpenAI Responses normalization", () => {
     const result = normalizer.normalize(exchangeFromFixture(fixture));
 
     expect(result).toMatchObject({ status: "unsupported", events: [] });
+  });
+
+  it("ignores identical identified SSE replays with visible evidence", () => {
+    const fixture = fixtures.find(
+      (candidate) => candidate.id === "responses-sse-text-function",
+    ) as ProtocolFixture;
+    const delta =
+      'id: delta-1\nevent: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_replay","delta":"first"}\n\n';
+    const responseBody = Buffer.from(
+      `${delta}${delta}id: terminal-1\nevent: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_replay","status":"completed"}}\n\n`,
+    );
+    const result = new DefaultNormalizerRegistry().normalize(
+      NormalizationExchangeSchema.parse({
+        ...exchangeFromFixture(fixture),
+        id: "responses-identical-replay",
+        responseBody,
+      }),
+    );
+
+    expect(
+      result.events.find((event) => event.type === "message.assistant")
+        ?.summary,
+    ).toEqual({ messageId: "msg_replay", text: "first" });
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ kind: "duplicate-replay", frameIndex: 2 }),
+    );
+    expect(result.events.map((event) => event.type)).toContain(
+      "parser.replay_ignored",
+    );
+  });
+
+  it("keeps the first identified SSE payload and exposes conflicts", () => {
+    const fixture = fixtures.find(
+      (candidate) => candidate.id === "responses-sse-text-function",
+    ) as ProtocolFixture;
+    const responseBody = Buffer.from(
+      [
+        'id: delta-1\nevent: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_conflict","delta":"first"}\n\n',
+        'id: delta-1\nevent: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_conflict","delta":"second"}\n\n',
+        'id: terminal-1\nevent: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_conflict","status":"completed"}}\n\n',
+      ].join(""),
+    );
+    const result = new DefaultNormalizerRegistry().normalize(
+      NormalizationExchangeSchema.parse({
+        ...exchangeFromFixture(fixture),
+        id: "responses-conflicting-replay",
+        responseBody,
+      }),
+    );
+
+    expect(result.status).toBe("malformed");
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ kind: "duplicate-conflict", frameIndex: 2 }),
+    );
+    expect(result.events.map((event) => event.type)).toContain("parser.error");
+    expect(
+      result.events.find((event) => event.type === "message.assistant")
+        ?.summary,
+    ).toEqual({ messageId: "msg_conflict", text: "first" });
   });
 });

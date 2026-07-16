@@ -8,6 +8,7 @@ import {
   type NormalizationResult,
   type ParserDiagnostic,
 } from "./contracts.js";
+import { SseReplayDetector } from "./duplicates.js";
 import { materializeCanonicalEvents } from "./events.js";
 import { decodeSseChunks, type SseFrame } from "./sse.js";
 
@@ -505,12 +506,14 @@ function normalizeSse(
   const parserId = "openai.chat-completions.sse";
   const diagnostics: ParserDiagnostic[] = [];
   const parserErrors: CanonicalEventDraft[] = [];
+  const duplicateErrors: CanonicalEventDraft[] = [];
   const unknownFrames: CanonicalEventDraft[] = [];
   const choices = new Map<number, ChoiceAssembly>();
   let responseId: string | undefined;
   let reportedUsage: ChatUsage | undefined;
   let incomplete = false;
   let frames: readonly SseFrame[] = [];
+  const replayDetector = new SseReplayDetector();
 
   try {
     const decoded = decodeSseChunks(
@@ -547,6 +550,14 @@ function normalizeSse(
     if (payload === undefined) {
       if (diagnostics.length > beforeDiagnostics) {
         parserErrors.push(parserErrorDraft(frame.index));
+      }
+      continue;
+    }
+    const replay = replayDetector.observe(frame, payload);
+    if (replay.kind !== "accept") {
+      diagnostics.push(replay.diagnostic);
+      if (replay.kind === "conflict") {
+        duplicateErrors.push(parserErrorDraft(frame.index));
       }
       continue;
     }
@@ -737,9 +748,10 @@ function normalizeSse(
 
   const drafts =
     parserErrors.length === 0
-      ? semantic
+      ? [...duplicateErrors, ...semantic]
       : [
           ...parserErrors,
+          ...duplicateErrors,
           ...semantic.filter(
             (draft) =>
               draft.type === "model.response.completed" ||
@@ -749,7 +761,10 @@ function normalizeSse(
   return NormalizationResultSchema.parse({
     parserId,
     parserVersion: CHAT_COMPLETIONS_NORMALIZER_VERSION,
-    status: parserErrors.length > 0 || incomplete ? "malformed" : "parsed",
+    status:
+      parserErrors.length > 0 || duplicateErrors.length > 0 || incomplete
+        ? "malformed"
+        : "parsed",
     events: materializeCanonicalEvents(exchange, drafts, options),
     diagnostics,
   });

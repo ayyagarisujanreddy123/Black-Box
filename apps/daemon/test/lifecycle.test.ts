@@ -126,6 +126,7 @@ function fixtureStatus(): DaemonStatus {
       requestsStarted: 0,
       requestsCompleted: 0,
       captureFailures: 0,
+      normalizationFailures: 0,
       droppedCaptureBytes: 0,
       droppedManifestEntries: 0,
       clientDisconnects: 0,

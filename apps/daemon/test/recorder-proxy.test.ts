@@ -16,7 +16,7 @@ import {
 } from "@blackbox/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RecorderProxy } from "../src/index.js";
+import { DurableNormalizationRunner, RecorderProxy } from "../src/index.js";
 
 interface HttpResult {
   readonly status: number;
@@ -61,6 +61,32 @@ async function makeUpstream(): Promise<{
         headers: request.headers,
         body,
       });
+
+      if (
+        request.url === "/v1/responses" &&
+        body.includes(Buffer.from('"model":"normalize-fixture"'))
+      ) {
+        const output = Buffer.from(
+          JSON.stringify({
+            id: "resp_normalized",
+            status: "completed",
+            output: [
+              {
+                type: "message",
+                id: "msg_normalized",
+                content: [{ type: "output_text", text: "normalized" }],
+              },
+            ],
+            usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 },
+          }),
+        );
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "content-length": output.length,
+        });
+        response.end(output);
+        return;
+      }
 
       if (request.url === "/sse") {
         response.writeHead(200, {
@@ -300,6 +326,85 @@ describe("byte-faithful recorder proxy", () => {
       expect(blob.includes(Buffer.from(secret))).toBe(false);
       expect(blob.includes(Buffer.from(cookie))).toBe(false);
     }
+  });
+
+  it("normalizes finalized exchanges durably and idempotently", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+    const body = Buffer.from(
+      JSON.stringify({ model: "normalize-fixture", input: "hello" }),
+    );
+    const result = await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/responses",
+      body,
+      {
+        "content-type": "application/json",
+        "x-blackbox-session": "session-normalization",
+      },
+    );
+    await proxy.flush();
+
+    expect(result.status).toBe(200);
+    const raw = latestRawExchange(storage);
+    const events = storage.events.list("session-normalization").events;
+    expect(raw.parseStatus).toBe("parsed");
+    expect(events.map((event) => event.type)).toEqual([
+      "model.request",
+      "message.assistant",
+      "model.usage",
+      "model.response.completed",
+    ]);
+    expect(events.map((event) => event.sequence)).toEqual([2, 3, 4, 5]);
+    expect(events[1]?.summary).toEqual({
+      messageId: "msg_normalized",
+      text: "normalized",
+    });
+    expect(
+      storage.sessions.getRequired("session-normalization").counts,
+    ).toEqual({
+      events: 4,
+      errors: 0,
+      inputTokens: null,
+      outputTokens: null,
+    });
+
+    const rerun = await new DurableNormalizationRunner(
+      storage,
+    ).normalizeExchange(raw.id);
+    expect(rerun.inserted).toBe(false);
+    expect(storage.events.count("session-normalization")).toBe(4);
+  });
+
+  it("fails open and reports normalization infrastructure failures", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage, {
+      normalizationRunner: {
+        async normalizeExchange() {
+          throw new Error("normalization fixture failure");
+        },
+      },
+    });
+    const body = Buffer.from("still-forwarded-after-normalizer-failure");
+    const result = await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/future-operation",
+      body,
+    );
+    await proxy.flush();
+
+    expect(result.body).toEqual(
+      Buffer.concat([Buffer.from("upstream:"), body]),
+    );
+    expect(latestRawExchange(storage).parseStatus).toBe("pending");
+    expect(proxy.health()).toMatchObject({
+      status: "degraded",
+      captureFailures: 0,
+      normalizationFailures: 1,
+      lastError: "normalization fixture failure",
+    });
   });
 
   it("preserves SSE bytes, frame order, and response chunk provenance", async () => {

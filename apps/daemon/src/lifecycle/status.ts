@@ -25,6 +25,7 @@ export const DaemonStatusSchema = z
         requestsStarted: z.number().int().nonnegative(),
         requestsCompleted: z.number().int().nonnegative(),
         captureFailures: z.number().int().nonnegative(),
+        normalizationFailures: z.number().int().nonnegative(),
         droppedCaptureBytes: z.number().int().nonnegative(),
         droppedManifestEntries: z.number().int().nonnegative(),
         clientDisconnects: z.number().int().nonnegative(),

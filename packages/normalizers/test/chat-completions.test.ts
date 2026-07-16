@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   CHAT_COMPLETIONS_NORMALIZER_VERSION,
   ChatCompletionsNormalizer,
+  DefaultNormalizerRegistry,
   NormalizationExchangeSchema,
   type NormalizationExchange,
 } from "../src/index.js";
@@ -251,5 +252,77 @@ describe("OpenAI Chat Completions normalization", () => {
         rawPayloadPreserved: true,
       },
     });
+  });
+
+  it("does not confuse repeated response IDs with replays", () => {
+    const fixture = fixtures.find(
+      (candidate) => candidate.id === "chat-sse-content-tools",
+    ) as ProtocolFixture;
+    const responseBody = Buffer.from(
+      [
+        'data: {"id":"chatcmpl_same","choices":[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl_same","choices":[{"index":0,"delta":{"content":" two"},"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""),
+    );
+    const result = normalizer.normalize(
+      NormalizationExchangeSchema.parse({
+        ...exchangeFromFixture(fixture),
+        id: "chat-repeated-response-id",
+        responseBody,
+      }),
+    );
+
+    expect(
+      result.events.find((event) => event.type === "message.assistant")
+        ?.summary,
+    ).toEqual({ text: "one two" });
+    expect(result.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "duplicate-replay" }),
+      ]),
+    );
+  });
+
+  it("handles identified Chat SSE replays and conflicts explicitly", () => {
+    const fixture = fixtures.find(
+      (candidate) => candidate.id === "chat-sse-content-tools",
+    ) as ProtocolFixture;
+    const first =
+      'id: chunk-1\ndata: {"id":"chatcmpl_replay","choices":[{"index":0,"delta":{"content":"first"},"finish_reason":null}]}\n\n';
+    const terminal =
+      'id: chunk-2\ndata: {"id":"chatcmpl_replay","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const replayed = new DefaultNormalizerRegistry().normalize(
+      NormalizationExchangeSchema.parse({
+        ...exchangeFromFixture(fixture),
+        id: "chat-identical-replay",
+        responseBody: Buffer.from(`${first}${first}${terminal}`),
+      }),
+    );
+    const conflicting = new DefaultNormalizerRegistry().normalize(
+      NormalizationExchangeSchema.parse({
+        ...exchangeFromFixture(fixture),
+        id: "chat-conflicting-replay",
+        responseBody: Buffer.from(
+          `${first}id: chunk-1\ndata: {"id":"chatcmpl_replay","choices":[{"index":0,"delta":{"content":"second"},"finish_reason":null}]}\n\n${terminal}`,
+        ),
+      }),
+    );
+
+    expect(
+      replayed.events.find((event) => event.type === "message.assistant")
+        ?.summary,
+    ).toEqual({ text: "first" });
+    expect(replayed.events.map((event) => event.type)).toContain(
+      "parser.replay_ignored",
+    );
+    expect(conflicting.status).toBe("malformed");
+    expect(conflicting.events.map((event) => event.type)).toContain(
+      "parser.error",
+    );
+    expect(
+      conflicting.events.find((event) => event.type === "message.assistant")
+        ?.summary,
+    ).toEqual({ text: "first" });
   });
 });

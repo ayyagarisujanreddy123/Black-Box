@@ -10,7 +10,7 @@ import type {
 
 const DEFAULT_REDACTION = { applied: false, ruleIds: [] } as const;
 
-function defaultEventId(
+export function canonicalEventId(
   exchange: NormalizationExchange,
   ordinal: number,
 ): string {
@@ -34,7 +34,7 @@ export function materializeCanonicalEvents(
   const observedAt =
     options.observedAt ?? exchange.endedAt ?? exchange.startedAt;
   const identifiers = drafts.map((_, index) =>
-    (options.eventId ?? defaultEventId)(exchange, index + 1),
+    (options.eventId ?? canonicalEventId)(exchange, index + 1),
   );
 
   return drafts.map((draft, index) => {

@@ -19,6 +19,10 @@ import {
 } from "@blackbox/protocol";
 import { ChunkManifestBuilder, type BlackBoxStorage } from "@blackbox/storage";
 
+import {
+  DurableNormalizationRunner,
+  type ExchangeNormalizationRunner,
+} from "../normalization/normalization-runner.js";
 import { BoundedByteCapture, CaptureMemoryBudget } from "./capture.js";
 import {
   resolveProxyConfiguration,
@@ -33,6 +37,7 @@ export interface RecorderProxyOptions extends ProxyConfigurationInput {
   readonly storage: BlackBoxStorage;
   readonly now?: () => Date;
   readonly sensitiveHeaderNames?: readonly string[];
+  readonly normalizationRunner?: ExchangeNormalizationRunner;
 }
 
 export interface ProxyAddress {
@@ -47,6 +52,7 @@ export interface ProxyHealth {
   readonly requestsStarted: number;
   readonly requestsCompleted: number;
   readonly captureFailures: number;
+  readonly normalizationFailures: number;
   readonly droppedCaptureBytes: number;
   readonly droppedManifestEntries: number;
   readonly clientDisconnects: number;
@@ -59,6 +65,7 @@ interface MutableProxyHealth {
   requestsStarted: number;
   requestsCompleted: number;
   captureFailures: number;
+  normalizationFailures: number;
   droppedCaptureBytes: number;
   droppedManifestEntries: number;
   clientDisconnects: number;
@@ -129,6 +136,7 @@ export class RecorderProxy {
   readonly configuration: ProxyConfiguration;
   private readonly server: Server;
   private readonly budget: CaptureMemoryBudget;
+  private readonly normalizationRunner: ExchangeNormalizationRunner;
   private readonly pendingJournals = new Set<Promise<void>>();
   private readonly defaultSessionId = `session-proxy-${randomUUID()}`;
   private readonly healthState: MutableProxyHealth = {
@@ -136,6 +144,7 @@ export class RecorderProxy {
     requestsStarted: 0,
     requestsCompleted: 0,
     captureFailures: 0,
+    normalizationFailures: 0,
     droppedCaptureBytes: 0,
     droppedManifestEntries: 0,
     clientDisconnects: 0,
@@ -148,6 +157,9 @@ export class RecorderProxy {
     this.budget = new CaptureMemoryBudget(
       this.configuration.captureQueueMaxBytes,
     );
+    this.normalizationRunner =
+      options.normalizationRunner ??
+      new DurableNormalizationRunner(options.storage);
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response);
     });
@@ -202,6 +214,7 @@ export class RecorderProxy {
     return {
       status:
         this.healthState.captureFailures > 0 ||
+        this.healthState.normalizationFailures > 0 ||
         this.healthState.droppedCaptureBytes > 0 ||
         this.healthState.droppedManifestEntries > 0
           ? "degraded"
@@ -210,6 +223,7 @@ export class RecorderProxy {
       requestsStarted: this.healthState.requestsStarted,
       requestsCompleted: this.healthState.requestsCompleted,
       captureFailures: this.healthState.captureFailures,
+      normalizationFailures: this.healthState.normalizationFailures,
       droppedCaptureBytes: this.healthState.droppedCaptureBytes,
       droppedManifestEntries: this.healthState.droppedManifestEntries,
       clientDisconnects: this.healthState.clientDisconnects,
@@ -590,7 +604,7 @@ export class RecorderProxy {
       const startedExchange = this.options.storage.rawExchanges.getRequired(
         state.id,
       );
-      this.options.storage.rawExchanges.finalize(
+      const finalized = this.options.storage.rawExchanges.finalize(
         RawExchangeSchema.parse({
           schemaVersion: 1,
           id: state.id,
@@ -628,6 +642,11 @@ export class RecorderProxy {
           },
         }),
       );
+      try {
+        await this.normalizationRunner.normalizeExchange(finalized.id);
+      } catch (error: unknown) {
+        this.recordNormalizationFailure(error);
+      }
     } catch (error: unknown) {
       this.recordCaptureFailure(error);
     } finally {
@@ -638,6 +657,12 @@ export class RecorderProxy {
 
   private recordCaptureFailure(error: unknown): void {
     this.healthState.captureFailures += 1;
+    this.healthState.lastError =
+      error instanceof Error ? error.message : String(error);
+  }
+
+  private recordNormalizationFailure(error: unknown): void {
+    this.healthState.normalizationFailures += 1;
     this.healthState.lastError =
       error instanceof Error ? error.message : String(error);
   }

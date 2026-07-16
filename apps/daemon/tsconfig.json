@@ -7,6 +7,7 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
+    { "path": "../../packages/normalizers" },
     { "path": "../../packages/protocol" },
     { "path": "../../packages/storage" }
   ]

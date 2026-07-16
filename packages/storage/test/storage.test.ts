@@ -536,6 +536,7 @@ describe("repositories, recovery, and stable ordering", () => {
     expect(first.inserted).toBe(true);
     expect(second).toEqual({ inserted: false, eventIds: ["event-normalized"] });
     expect(storage.events.count("session-storage")).toBe(1);
+    expect(after.parseStatus).toBe("parsed");
     expect(after.requestBodyRef?.sha256).toBe(before.requestBodyRef?.sha256);
     expect(after.responseBodyRef?.sha256).toBe(before.responseBodyRef?.sha256);
     expect(storage.events.search("session-storage", "README")).toHaveLength(1);
@@ -549,6 +550,18 @@ describe("repositories, recovery, and stable ordering", () => {
         parserVersion: "responses-v1",
         events: [
           event("event-conflict", "session-storage", 2, "message.assistant"),
+        ],
+      }),
+    ).toThrow(StorageIntegrityError);
+    expect(() =>
+      storage.events.insertNormalization({
+        exchangeId: "exchange-storage",
+        parserVersion: "responses-v1",
+        events: [
+          BlackBoxEventSchema.parse({
+            ...normalizedEvent,
+            summary: { name: "changed_after_normalization" },
+          }),
         ],
       }),
     ).toThrow(StorageIntegrityError);

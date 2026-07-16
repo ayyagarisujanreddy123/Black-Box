@@ -8,6 +8,9 @@ export default defineConfig({
       "@blackbox/daemon": fileURLToPath(
         new URL("./apps/daemon/src/index.ts", import.meta.url),
       ),
+      "@blackbox/normalizers": fileURLToPath(
+        new URL("./packages/normalizers/src/index.ts", import.meta.url),
+      ),
       "@blackbox/protocol": fileURLToPath(
         new URL("./packages/protocol/src/index.ts", import.meta.url),
       ),

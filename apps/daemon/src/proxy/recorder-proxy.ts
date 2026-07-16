@@ -12,6 +12,11 @@ import type { AddressInfo } from "node:net";
 import { Transform } from "node:stream";
 
 import {
+  CHAT_COMPLETIONS_NORMALIZER_VERSION,
+  RESPONSES_NORMALIZER_VERSION,
+  UNKNOWN_NORMALIZER_VERSION,
+} from "@blackbox/normalizers";
+import {
   RawExchangeSchema,
   SessionSchema,
   type RawExchangeOutcome,
@@ -23,6 +28,12 @@ import {
   DurableNormalizationRunner,
   type ExchangeNormalizationRunner,
 } from "../normalization/normalization-runner.js";
+import {
+  SESSION_SIGNAL_HEADER_NAMES,
+  SESSION_SIGNAL_HEADERS,
+  Sessionizer,
+  type SessionizationDecision,
+} from "../sessionization/sessionizer.js";
 import { BoundedByteCapture, CaptureMemoryBudget } from "./capture.js";
 import {
   resolveProxyConfiguration,
@@ -31,13 +42,12 @@ import {
 } from "./config.js";
 import { headersForForwarding, headersForPersistence } from "./headers.js";
 
-const INTERNAL_SESSION_HEADER = "x-blackbox-session";
-
 export interface RecorderProxyOptions extends ProxyConfigurationInput {
   readonly storage: BlackBoxStorage;
   readonly now?: () => Date;
   readonly sensitiveHeaderNames?: readonly string[];
   readonly normalizationRunner?: ExchangeNormalizationRunner;
+  readonly sessionizer?: Sessionizer;
 }
 
 export interface ProxyAddress {
@@ -137,6 +147,7 @@ export class RecorderProxy {
   private readonly server: Server;
   private readonly budget: CaptureMemoryBudget;
   private readonly normalizationRunner: ExchangeNormalizationRunner;
+  private readonly sessionizer: Sessionizer;
   private readonly pendingJournals = new Set<Promise<void>>();
   private readonly defaultSessionId = `session-proxy-${randomUUID()}`;
   private readonly healthState: MutableProxyHealth = {
@@ -157,9 +168,13 @@ export class RecorderProxy {
     this.budget = new CaptureMemoryBudget(
       this.configuration.captureQueueMaxBytes,
     );
+    this.sessionizer = options.sessionizer ?? new Sessionizer();
+    this.restoreResponseAncestry();
     this.normalizationRunner =
       options.normalizationRunner ??
-      new DurableNormalizationRunner(options.storage);
+      new DurableNormalizationRunner(options.storage, {
+        knownResponseIds: () => this.sessionizer.knownResponseIds(),
+      });
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response);
     });
@@ -171,6 +186,29 @@ export class RecorderProxy {
     this.server.on("clientError", (_error, socket) => {
       socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
     });
+  }
+
+  private restoreResponseAncestry(): void {
+    for (const session of this.options.storage.sessions.list(1000)) {
+      let cursor: string | undefined;
+      do {
+        const page = this.options.storage.events.list(session.id, {
+          limit: 1000,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        for (const event of page.events) {
+          const responseId = event.summary.responseId;
+          if (typeof responseId === "string" && responseId.length > 0) {
+            try {
+              this.sessionizer.registerResponse(responseId, session.id);
+            } catch (error: unknown) {
+              this.recordNormalizationFailure(error);
+            }
+          }
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+    }
   }
 
   async start(): Promise<ProxyAddress> {
@@ -267,21 +305,72 @@ export class RecorderProxy {
     return (this.options.now ?? (() => new Date()))().toISOString();
   }
 
-  private ensureSession(request: IncomingMessage): string {
-    const sessionId =
-      headerValue(request.headers, INTERNAL_SESSION_HEADER) ??
-      this.defaultSessionId;
-    if (this.options.storage.sessions.get(sessionId) === undefined) {
+  private ensureSession(request: IncomingMessage): SessionizationDecision {
+    const ancestorHeader = headerValue(
+      request.headers,
+      SESSION_SIGNAL_HEADERS.ancestry,
+    );
+    const analysisSessionId = headerValue(
+      request.headers,
+      SESSION_SIGNAL_HEADERS.analysis,
+    );
+    const analysisTargetSessionId = headerValue(
+      request.headers,
+      SESSION_SIGNAL_HEADERS.analysisTarget,
+    );
+    const explicitSessionId = headerValue(
+      request.headers,
+      SESSION_SIGNAL_HEADERS.explicit,
+    );
+    const adapterSessionId = headerValue(
+      request.headers,
+      SESSION_SIGNAL_HEADERS.adapter,
+    );
+    const decision = this.sessionizer.resolve(
+      {
+        ...(analysisSessionId === undefined ? {} : { analysisSessionId }),
+        ...(analysisTargetSessionId === undefined
+          ? {}
+          : { analysisTargetSessionId }),
+        ...(explicitSessionId === undefined ? {} : { explicitSessionId }),
+        ...(adapterSessionId === undefined ? {} : { adapterSessionId }),
+        ...(ancestorHeader === undefined
+          ? {}
+          : {
+              ancestorResponseIds: ancestorHeader
+                .split(",")
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0),
+            }),
+        clientFingerprint:
+          headerValue(request.headers, SESSION_SIGNAL_HEADERS.client) ??
+          `${request.socket.remoteAddress ?? "unknown"}|${headerValue(request.headers, "user-agent") ?? "unknown"}`,
+      },
+      Date.parse(this.nowIso()),
+    );
+    const existingSession = this.options.storage.sessions.get(
+      decision.sessionId,
+    );
+    if (
+      existingSession !== undefined &&
+      (existingSession.metadata.internalAnalysis === true) !==
+        decision.internalAnalysis
+    ) {
+      throw new Error(
+        `Session ${decision.sessionId} cannot mix analysis and investigated traffic.`,
+      );
+    }
+    if (existingSession === undefined) {
       this.options.storage.sessions.create(
         SessionSchema.parse({
           schemaVersion: 1,
-          id: sessionId,
+          id: decision.sessionId,
           startedAt: this.nowIso(),
           status: "active",
-          captureLevel: "api",
+          captureLevel: decision.source === "adapter" ? "adapter" : "api",
           models: [],
           upstreamOrigin: this.configuration.upstream.origin,
-          tags: [],
+          tags: decision.internalAnalysis ? ["internal-analysis"] : [],
           counts: {
             events: 0,
             errors: 0,
@@ -289,23 +378,43 @@ export class RecorderProxy {
             outputTokens: null,
           },
           metadata: {
-            sessionization:
-              headerValue(request.headers, INTERNAL_SESSION_HEADER) ===
-              undefined
-                ? "proxy-default"
-                : "explicit-header",
+            internalAnalysis: decision.internalAnalysis,
+            ...(decision.analysisTargetSessionId === undefined
+              ? {}
+              : {
+                  analysisTargetSessionId: decision.analysisTargetSessionId,
+                }),
+            sessionization: {
+              source: decision.source,
+              heuristic: decision.source === "heuristic",
+              idleWindowMilliseconds: this.sessionizer.idleWindowMilliseconds,
+            },
+            captureConfiguration: {
+              captureQueueMaxBytes: this.configuration.captureQueueMaxBytes,
+              maxRequestBodyBytes: this.configuration.maxRequestBodyBytes,
+              maxResponseBodyBytes: this.configuration.maxResponseBodyBytes,
+              maxChunkManifestEntries:
+                this.configuration.maxChunkManifestEntries,
+              upstreamTimeoutMs: this.configuration.upstreamTimeoutMs ?? null,
+              transports: ["http-json", "http-sse"],
+            },
+            normalizerVersions: {
+              "openai.responses": RESPONSES_NORMALIZER_VERSION,
+              "openai.chat-completions": CHAT_COMPLETIONS_NORMALIZER_VERSION,
+              "unknown-openai-compatible": UNKNOWN_NORMALIZER_VERSION,
+            },
           },
         }),
       );
     }
-    return sessionId;
+    return decision;
   }
 
   private createEvidenceState(
     request: IncomingMessage,
     target: RequestTarget,
   ): EvidenceState {
-    const sessionId = this.ensureSession(request);
+    const sessionId = this.ensureSession(request).sessionId;
     const sequence = this.options.storage.sequences.reserve(sessionId)[0];
     if (sequence === undefined) {
       throw new Error(`Failed to allocate sequence for ${sessionId}.`);
@@ -317,10 +426,10 @@ export class RecorderProxy {
       sessionId,
       sequence,
       startedAt,
-      requestHeaders: headersForPersistence(
-        request.headers,
-        this.options.sensitiveHeaderNames,
-      ),
+      requestHeaders: headersForPersistence(request.headers, [
+        ...(this.options.sensitiveHeaderNames ?? []),
+        ...SESSION_SIGNAL_HEADER_NAMES,
+      ]),
       requestCapture: new BoundedByteCapture(
         this.configuration.maxRequestBodyBytes,
         this.budget,
@@ -457,7 +566,7 @@ export class RecorderProxy {
 
     const forwardedHeaders = headersForForwarding(request.headers, {
       dropHost: true,
-      dropNames: [INTERNAL_SESSION_HEADER],
+      dropNames: SESSION_SIGNAL_HEADER_NAMES,
     });
     const transport =
       target.upstreamUrl.protocol === "https:" ? httpsRequest : httpRequest;
@@ -643,7 +752,15 @@ export class RecorderProxy {
         }),
       );
       try {
-        await this.normalizationRunner.normalizeExchange(finalized.id);
+        const normalized = await this.normalizationRunner.normalizeExchange(
+          finalized.id,
+        );
+        for (const event of normalized.normalization.events) {
+          const responseId = event.summary.responseId;
+          if (typeof responseId === "string" && responseId.length > 0) {
+            this.sessionizer.registerResponse(responseId, finalized.sessionId);
+          }
+        }
       } catch (error: unknown) {
         this.recordNormalizationFailure(error);
       }

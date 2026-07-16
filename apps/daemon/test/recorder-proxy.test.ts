@@ -369,12 +369,152 @@ describe("byte-faithful recorder proxy", () => {
       inputTokens: null,
       outputTokens: null,
     });
+    expect(
+      storage.sessions.getRequired("session-normalization").metadata,
+    ).toMatchObject({
+      internalAnalysis: false,
+      sessionization: { source: "explicit", heuristic: false },
+      captureConfiguration: {
+        maxRequestBodyBytes: proxy.configuration.maxRequestBodyBytes,
+        maxResponseBodyBytes: proxy.configuration.maxResponseBodyBytes,
+        transports: ["http-json", "http-sse"],
+      },
+      normalizerVersions: {
+        "openai.responses": "1.0.0",
+        "openai.chat-completions": "1.0.0",
+        "unknown-openai-compatible": "1.0.0",
+      },
+    });
 
     const rerun = await new DurableNormalizationRunner(
       storage,
     ).normalizeExchange(raw.id);
     expect(rerun.inserted).toBe(false);
     expect(storage.events.count("session-normalization")).toBe(4);
+  });
+
+  it("continues a known response ancestry session and strips grouping signals", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    let proxy = await makeProxy(upstream.origin, storage);
+    const body = Buffer.from(
+      JSON.stringify({ model: "normalize-fixture", input: "hello" }),
+    );
+
+    await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/responses",
+      body,
+      {
+        "content-type": "application/json",
+        "x-blackbox-session": "session-ancestry",
+      },
+    );
+    await proxy.flush();
+    await proxy.close();
+    proxies.splice(proxies.indexOf(proxy), 1);
+    proxy = await makeProxy(upstream.origin, storage);
+    await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/responses",
+      Buffer.from(
+        JSON.stringify({
+          model: "normalize-fixture",
+          previous_response_id: "resp_normalized",
+          input: "continue",
+        }),
+      ),
+      {
+        "content-type": "application/json",
+        "x-blackbox-response-ancestor": "resp_normalized",
+        "x-blackbox-client-id": "different-client",
+      },
+    );
+    await proxy.flush();
+
+    const rows = storage.unsafeDatabase
+      .prepare("SELECT id FROM raw_exchanges ORDER BY sequence, id")
+      .all() as { id: string }[];
+    const exchanges = rows.map(({ id }) =>
+      storage.rawExchanges.getRequired(id),
+    );
+    expect(exchanges).toHaveLength(2);
+    expect(exchanges.map((exchange) => exchange.sessionId)).toEqual([
+      "session-ancestry",
+      "session-ancestry",
+    ]);
+    expect(
+      exchanges[1]?.requestHeaders["x-blackbox-response-ancestor"],
+    ).toBeUndefined();
+    expect(
+      upstream.observations[1]?.headers["x-blackbox-response-ancestor"],
+    ).toBeUndefined();
+    expect(
+      upstream.observations[1]?.headers["x-blackbox-client-id"],
+    ).toBeUndefined();
+    expect(
+      storage.events
+        .list("session-ancestry", { type: "model.request" })
+        .events.at(-1)?.summary,
+    ).toEqual({
+      previousResponseId: "resp_normalized",
+      contextCompleteness: "complete-client-chain",
+    });
+  });
+
+  it("keeps internal analysis traffic out of the investigated session", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+
+    await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/future-operation",
+      Buffer.from("investigated"),
+      { "x-blackbox-session": "session-investigated" },
+    );
+    await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/future-operation",
+      Buffer.from("analysis"),
+      {
+        "x-blackbox-session": "session-investigated",
+        "x-blackbox-analysis-session": "analysis-run-1",
+        "x-blackbox-analysis-target": "session-investigated",
+      },
+    );
+    await proxy.flush();
+
+    const sessions = storage.sessions.list();
+    const analysis = sessions.find(
+      (session) => session.metadata.internalAnalysis === true,
+    );
+    expect(analysis).toBeDefined();
+    expect(analysis?.id).not.toBe("session-investigated");
+    expect(analysis).toMatchObject({
+      captureLevel: "api",
+      tags: ["internal-analysis"],
+      metadata: {
+        internalAnalysis: true,
+        analysisTargetSessionId: "session-investigated",
+        sessionization: { source: "analysis" },
+      },
+    });
+    expect(storage.events.count("session-investigated")).toBe(1);
+    expect(storage.events.count(analysis?.id as string)).toBe(1);
+    const analysisRawRow = storage.unsafeDatabase
+      .prepare("SELECT id FROM raw_exchanges WHERE session_id = ?")
+      .get(analysis?.id) as { id: string };
+    const analysisRaw = storage.rawExchanges.getRequired(analysisRawRow.id);
+    expect(
+      analysisRaw.requestHeaders["x-blackbox-analysis-session"],
+    ).toBeUndefined();
+    expect(
+      upstream.observations[1]?.headers["x-blackbox-analysis-session"],
+    ).toBeUndefined();
+    expect(
+      upstream.observations[1]?.headers["x-blackbox-session"],
+    ).toBeUndefined();
   });
 
   it("fails open and reports normalization infrastructure failures", async () => {

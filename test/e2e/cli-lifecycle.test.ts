@@ -104,13 +104,27 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     request.on("end", () => {
       const body = Buffer.concat(chunks);
       observations.push({ headers: request.headers, body });
+      const output = Buffer.from(
+        JSON.stringify({
+          id: "resp_packaged_e2e",
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              id: "msg_packaged_e2e",
+              content: [{ type: "output_text", text: "packaged" }],
+            },
+          ],
+          usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
+        }),
+      );
       response.writeHead(200, {
-        "content-type": "application/octet-stream",
+        "content-type": "application/json",
+        "content-length": output.length,
         "set-cookie": "provider=e2e; HttpOnly",
         "x-e2e-upstream": "packaged",
       });
-      response.write("fixture:");
-      setImmediate(() => response.end(body));
+      setImmediate(() => response.end(output));
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -196,6 +210,36 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       (await runCli(["status", "--home", root, "--json"])).stdout,
     ) as { proxy: { requestsCompleted: number } };
     expect(afterRequest.proxy.requestsCompleted).toBe(1);
+
+    type Inspection = {
+      session: { id: string };
+      events: { type: string }[];
+    };
+    let inspection: Inspection | undefined;
+    const inspectionDeadline = Date.now() + 2_000;
+    while (Date.now() < inspectionDeadline && inspection === undefined) {
+      const sessions = JSON.parse(
+        (await runCli(["sessions", "--home", root, "--json"])).stdout,
+      ) as { id: string }[];
+      const session = sessions[0];
+      if (session !== undefined) {
+        const candidate = JSON.parse(
+          (await runCli(["inspect", session.id, "--home", root, "--json"]))
+            .stdout,
+        ) as Inspection;
+        if ((candidate?.events.length ?? 0) > 0) {
+          inspection = candidate;
+          break;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(inspection?.events.map((event) => event.type)).toEqual([
+      "model.request",
+      "message.assistant",
+      "model.usage",
+      "model.response.completed",
+    ]);
 
     const stopped = await runCli(["stop", "--home", root]);
     expect(stopped.stderr).toBe("");

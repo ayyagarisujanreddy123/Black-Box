@@ -1,6 +1,6 @@
 # Black Box Execution Plan
 
-Status: M0–M2 complete; M3 ready to execute
+Status: M0–M3 complete; M4 ready to execute
 
 Version: 0.1
 
@@ -155,6 +155,8 @@ Acceptance:
 Exit artifact: an agent can use the proxy through `OPENAI_BASE_URL` and receive an unchanged response.
 
 ### M3 — Normalization and sessionization
+
+Implementation status: Complete on 2026-07-16. The exit artifact is covered by all eleven golden normalization snapshots, replay/conflict tests for both streaming protocols, durable proxy integration, sessionization precedence/isolation tests, and packaged CLI inspection.
 
 Goal: turn raw protocol evidence into a stable forensic event stream.
 

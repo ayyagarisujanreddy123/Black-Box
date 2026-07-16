@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -19,6 +20,7 @@ import {
   parseCliArguments,
   pathsFromFlags,
   resolveStartConfiguration,
+  stringFlag,
   type ParsedCliArguments,
 } from "./configuration.js";
 import {
@@ -36,6 +38,8 @@ Usage:
   blackbox stop [--timeout-ms MS]
   blackbox status [--json]
   blackbox doctor [--upstream URL] [--websocket] [--json]
+  blackbox sessions [--limit N] [--json]
+  blackbox inspect <session-id> [--limit N] [--type EVENT_TYPE] [--json]
 
 Common options:
   --home PATH                     Override the private Black Box data directory
@@ -53,6 +57,12 @@ Start and doctor options:
   --max-response-body-bytes N     Per-response capture bound
   --max-chunk-manifest-entries N  Per-exchange provenance entry bound
   --upstream-timeout-ms MS        Optional provider timeout
+
+Inspection options:
+  --limit N                       Bound sessions/events returned (default 100)
+  --type EVENT_TYPE               Filter inspect output by canonical event type
+  --cursor CURSOR                 Continue inspect from a prior JSON page
+  --include-internal              Include isolated analysis sessions in listings
 `;
 
 export interface CliOutput {
@@ -389,6 +399,108 @@ async function commandDoctor(
   return report.ok ? 0 : 1;
 }
 
+async function openInspectionStorage(paths: DaemonPaths) {
+  try {
+    await access(paths.databasePath);
+  } catch (error: unknown) {
+    throw new Error(
+      `Black Box is not initialized at ${paths.homeDirectory}. Run 'blackbox init' first.`,
+      { cause: error },
+    );
+  }
+  return openBlackBoxStorage({
+    databasePath: paths.databasePath,
+    dataDirectory: paths.dataDirectory,
+    recoverIncompleteExchanges: false,
+  });
+}
+
+async function commandSessions(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const paths = pathsFromFlags(parsed.flags);
+  const storage = await openInspectionStorage(paths);
+  try {
+    const limit = integerFlag(parsed.flags, "limit", 100, 1, 1000);
+    const sessions = storage.sessions
+      .list(1000)
+      .filter(
+        (session) =>
+          parsed.flags.has("include-internal") ||
+          session.metadata.internalAnalysis !== true,
+      )
+      .slice(0, limit);
+    if (parsed.flags.has("json")) {
+      runtime.stdout.write(`${JSON.stringify(sessions)}\n`);
+      return 0;
+    }
+    if (sessions.length === 0) {
+      runtime.stdout.write("No recorded sessions.\n");
+      return 0;
+    }
+    for (const session of sessions) {
+      runtime.stdout.write(
+        `${session.id}\t${session.status}\t${session.startedAt}\t${session.counts.events} events\n`,
+      );
+    }
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
+async function commandInspect(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const sessionId = parsed.positionals[0];
+  if (sessionId === undefined) {
+    throw new CliUsageError("inspect requires exactly one session ID.");
+  }
+  const paths = pathsFromFlags(parsed.flags);
+  const storage = await openInspectionStorage(paths);
+  try {
+    const session = storage.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session ${sessionId} does not exist.`);
+    }
+    const type = stringFlag(parsed.flags, "type");
+    const cursor = stringFlag(parsed.flags, "cursor");
+    const page = storage.events.list(sessionId, {
+      limit: integerFlag(parsed.flags, "limit", 100, 1, 1000),
+      ...(type === undefined ? {} : { type }),
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    if (parsed.flags.has("json")) {
+      runtime.stdout.write(
+        `${JSON.stringify({
+          session,
+          events: page.events,
+          ...(page.nextCursor === undefined
+            ? {}
+            : { nextCursor: page.nextCursor }),
+        })}\n`,
+      );
+      return 0;
+    }
+    runtime.stdout.write(
+      `Session ${session.id}: ${session.status}, ${session.counts.events} canonical events\n`,
+    );
+    for (const event of page.events) {
+      runtime.stdout.write(`${JSON.stringify(event)}\n`);
+    }
+    if (page.nextCursor !== undefined) {
+      runtime.stdout.write(
+        `More events remain; continue with --cursor ${page.nextCursor}.\n`,
+      );
+    }
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
 export async function runCli(
   arguments_: readonly string[],
   runtimeOverrides: Partial<CliRuntime> = {},
@@ -411,6 +523,10 @@ export async function runCli(
         return await commandStatus(parsed, runtime);
       case "doctor":
         return await commandDoctor(parsed, runtime);
+      case "sessions":
+        return await commandSessions(parsed, runtime);
+      case "inspect":
+        return await commandInspect(parsed, runtime);
     }
   } catch (error: unknown) {
     const usage = error instanceof CliUsageError;

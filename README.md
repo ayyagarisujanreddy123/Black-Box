@@ -6,7 +6,7 @@ Black Box is being built as a CLI-managed localhost recorder with a browser cock
 
 ## Current status
 
-Milestones M0 through M2 provide a runnable, byte-faithful local recorder:
+Milestones M0 through M3 provide a runnable, byte-faithful local recorder with canonical evidence:
 
 - strict npm/TypeScript workspace boundaries;
 - versioned Zod contracts for sessions, raw exchanges, canonical events, reconstructed context, blame results, and incident reports;
@@ -22,9 +22,14 @@ Milestones M0 through M2 provide a runnable, byte-faithful local recorder:
 - explicit evidence for completion, timeouts, client cancellation, upstream disconnects, and degraded capture;
 - mandatory exclusion of authorization, cookie, and configured sensitive header values from persisted header evidence;
 - a private per-install control token, loopback-only authenticated control API, atomic daemon lock, stale-lock recovery, and bounded shutdown;
-- working `blackbox init`, `start`, `stop`, `status`, and `doctor` commands, including detached process management and real diagnostics.
+- working `blackbox init`, `start`, `stop`, `status`, and `doctor` commands, including detached process management and real diagnostics;
+- versioned Responses JSON/SSE and Chat Completions JSON/SSE normalizers with logical text and tool-call assembly;
+- durable off-path normalization, parser-error evidence, unknown-event retention, and explicit first-wins replay/conflict handling;
+- explicit, adapter, known-ancestry, and bounded idle-window session assignment with isolated internal analysis sessions;
+- per-session capture and normalizer-version snapshots;
+- working `blackbox sessions` and `blackbox inspect` commands for canonical event JSON.
 
-HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Normalization, process/filesystem observation, analysis, and the browser viewer begin in M3 and later milestones.
+HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Process/filesystem observation begins in M4; the browser query API and viewer begin in M5. Deterministic and optional model analysis arrive in later milestones.
 
 ## Development quickstart
 
@@ -44,10 +49,14 @@ npm run blackbox -- doctor
 npm run blackbox -- start
 npm run blackbox -- status
 # Point an OpenAI-compatible client at the OPENAI_BASE_URL printed by start.
+npm run blackbox -- sessions
+npm run blackbox -- inspect <session-id> --json
 npm run blackbox -- stop
 ```
 
 Use `--home PATH` or `BLACKBOX_HOME` to select the private data directory. Configure the provider with `--upstream URL` or `BLACKBOX_UPSTREAM_URL`; Black Box deliberately never treats `OPENAI_BASE_URL` as its upstream because that variable points clients back to the recorder.
+
+Session assignment follows explicit `X-Blackbox-Session`, adapter `X-Blackbox-Agent-Session`, known `X-Blackbox-Response-Ancestor`, and short client-idle grouping in that order. Internal model analysis must set `X-Blackbox-Analysis-Session` and may identify the investigated session with `X-Blackbox-Analysis-Target`; analysis isolation overrides all ordinary grouping signals. These reserved headers are recorder controls and are neither forwarded upstream nor retained in raw request headers.
 
 Useful individual commands:
 

@@ -7,12 +7,14 @@ import {
   type ProxyConfiguration,
 } from "@blackbox/daemon";
 
-export type CliCommand = "init" | "start" | "stop" | "status" | "doctor";
+export type CliCommand =
+  "init" | "start" | "stop" | "status" | "doctor" | "sessions" | "inspect";
 
 export interface ParsedCliArguments {
   readonly command?: CliCommand;
   readonly help: boolean;
   readonly flags: ReadonlyMap<string, string | true>;
+  readonly positionals: readonly string[];
 }
 
 export interface ResolvedStartConfiguration {
@@ -30,6 +32,8 @@ const COMMANDS = new Set<CliCommand>([
   "stop",
   "status",
   "doctor",
+  "sessions",
+  "inspect",
 ]);
 
 const VALUE_FLAGS = new Set([
@@ -46,9 +50,17 @@ const VALUE_FLAGS = new Set([
   "upstream-timeout-ms",
   "shutdown-grace-ms",
   "timeout-ms",
+  "limit",
+  "type",
+  "cursor",
 ]);
 
-const BOOLEAN_FLAGS = new Set(["allow-non-loopback", "json", "websocket"]);
+const BOOLEAN_FLAGS = new Set([
+  "allow-non-loopback",
+  "json",
+  "websocket",
+  "include-internal",
+]);
 
 const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   init: new Set(["home"]),
@@ -86,6 +98,8 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
     "json",
     "websocket",
   ]),
+  sessions: new Set(["home", "limit", "json", "include-internal"]),
+  inspect: new Set(["home", "limit", "type", "cursor", "json"]),
 };
 
 export class CliUsageError extends Error {
@@ -103,7 +117,7 @@ export function parseCliArguments(
     arguments_[0] === "--help" ||
     arguments_[0] === "-h"
   ) {
-    return { help: true, flags: new Map() };
+    return { help: true, flags: new Map(), positionals: [] };
   }
 
   const commandValue = arguments_[0];
@@ -112,6 +126,7 @@ export function parseCliArguments(
   }
   const command = commandValue as CliCommand;
   const flags = new Map<string, string | true>();
+  const positionals: string[] = [];
   let help = false;
 
   for (let index = 1; index < arguments_.length; index += 1) {
@@ -121,7 +136,8 @@ export function parseCliArguments(
       continue;
     }
     if (!token.startsWith("--")) {
-      throw new CliUsageError(`Unexpected positional argument '${token}'.`);
+      positionals.push(token);
+      continue;
     }
     const equals = token.indexOf("=");
     const name = token.slice(2, equals === -1 ? undefined : equals);
@@ -158,7 +174,16 @@ export function parseCliArguments(
       throw new CliUsageError(`Flag --${name} is not valid for ${command}.`);
     }
   }
-  return { command, help, flags };
+  if (command === "inspect") {
+    if (!help && positionals.length !== 1) {
+      throw new CliUsageError("inspect requires exactly one session ID.");
+    }
+  } else if (positionals.length > 0) {
+    throw new CliUsageError(
+      `Unexpected positional argument '${positionals[0] as string}'.`,
+    );
+  }
+  return { command, help, flags, positionals };
 }
 
 export function stringFlag(

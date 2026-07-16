@@ -10,6 +10,7 @@ import {
   resolveDaemonPaths,
   type DaemonPaths,
 } from "@blackbox/daemon";
+import { openBlackBoxStorage } from "@blackbox/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -239,6 +240,169 @@ describe("CLI daemon lifecycle", () => {
         paths,
       ),
     ).rejects.toBeInstanceOf(UnsafeControlOriginError);
+  });
+});
+
+describe("CLI canonical inspection", () => {
+  it("lists user sessions and emits canonical event JSON", async () => {
+    const root = await temporaryRoot();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const cliRuntime = runtime(stdout, stderr);
+    const paths = resolveDaemonPaths(root);
+    const startedAt = "2026-07-16T12:00:00.000Z";
+
+    expect(await runCli(["init", "--home", root], cliRuntime)).toBe(0);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      for (const [id, internalAnalysis] of [
+        ["session-visible", false],
+        ["session-internal", true],
+      ] as const) {
+        storage.sessions.create({
+          schemaVersion: 1,
+          id,
+          startedAt,
+          status: "active",
+          captureLevel: "api",
+          models: [],
+          tags: internalAnalysis ? ["internal-analysis"] : [],
+          counts: {
+            events: 0,
+            errors: 0,
+            inputTokens: null,
+            outputTokens: null,
+          },
+          metadata: { internalAnalysis },
+        });
+      }
+      storage.events.insert({
+        schemaVersion: 1,
+        id: "event-visible-1",
+        sessionId: "session-visible",
+        sequence: 1,
+        occurredAt: startedAt,
+        observedAt: startedAt,
+        source: "proxy",
+        type: "message.assistant",
+        evidence: "observed",
+        summary: { text: "inspectable" },
+        redaction: { applied: false, ruleIds: [] },
+      });
+      storage.events.insert({
+        schemaVersion: 1,
+        id: "event-visible-2",
+        sessionId: "session-visible",
+        sequence: 2,
+        occurredAt: startedAt,
+        observedAt: startedAt,
+        source: "proxy",
+        type: "tool.call",
+        evidence: "observed",
+        summary: { name: "inspect" },
+        redaction: { applied: false, ruleIds: [] },
+      });
+    } finally {
+      storage.close();
+    }
+
+    stdout.clear();
+    expect(
+      await runCli(["sessions", "--home", root, "--json"], cliRuntime),
+    ).toBe(0);
+    expect(
+      (JSON.parse(stdout.value) as { id: string }[]).map(
+        (session) => session.id,
+      ),
+    ).toEqual(["session-visible"]);
+
+    stdout.clear();
+    expect(
+      await runCli(
+        ["sessions", "--home", root, "--include-internal", "--json"],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toHaveLength(2);
+
+    stdout.clear();
+    expect(
+      await runCli(
+        ["inspect", "session-visible", "--home", root, "--json"],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    const inspection = JSON.parse(stdout.value) as {
+      session: { id: string };
+      events: { id: string; type: string; summary: unknown }[];
+    };
+    expect(inspection.session.id).toBe("session-visible");
+    expect(inspection.events).toEqual([
+      expect.objectContaining({
+        id: "event-visible-1",
+        type: "message.assistant",
+        summary: { text: "inspectable" },
+      }),
+      expect.objectContaining({ id: "event-visible-2", type: "tool.call" }),
+    ]);
+
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "inspect",
+          "session-visible",
+          "--home",
+          root,
+          "--limit",
+          "1",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    const firstPage = JSON.parse(stdout.value) as {
+      events: { id: string }[];
+      nextCursor: string;
+    };
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "inspect",
+          "session-visible",
+          "--home",
+          root,
+          "--limit",
+          "1",
+          "--cursor",
+          firstPage.nextCursor,
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(firstPage.events.map((event) => event.id)).toEqual([
+      "event-visible-1",
+    ]);
+    expect(
+      (JSON.parse(stdout.value) as { events: { id: string }[] }).events.map(
+        (event) => event.id,
+      ),
+    ).toEqual(["event-visible-2"]);
+    expect(stderr.value).toBe("");
+  });
+
+  it("validates inspect positional arguments", async () => {
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+
+    expect(await runCli(["inspect"], runtime(stdout, stderr))).toBe(2);
+    expect(stderr.value).toContain("requires exactly one session ID");
   });
 });
 

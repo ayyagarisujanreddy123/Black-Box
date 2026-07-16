@@ -8,6 +8,9 @@ export default defineConfig({
       "@blackbox/protocol": fileURLToPath(
         new URL("./packages/protocol/src/index.ts", import.meta.url),
       ),
+      "@blackbox/storage": fileURLToPath(
+        new URL("./packages/storage/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {

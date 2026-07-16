@@ -17,7 +17,8 @@
     "noUncheckedIndexedAccess": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
-      "@blackbox/protocol": ["./packages/protocol/src/index.ts"]
+      "@blackbox/protocol": ["./packages/protocol/src/index.ts"],
+      "@blackbox/storage": ["./packages/storage/src/index.ts"]
     },
     "skipLibCheck": false,
     "sourceMap": true,

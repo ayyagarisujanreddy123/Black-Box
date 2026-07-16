@@ -1,4 +1,3 @@
-export const daemonFoundation = {
-  milestone: 0,
-  status: "contracts-only",
-} as const;
+export * from "./proxy/config.js";
+export * from "./proxy/errors.js";
+export * from "./proxy/headers.js";

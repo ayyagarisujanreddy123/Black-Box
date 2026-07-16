@@ -1,0 +1,90 @@
+import { SafeHeadersSchema, type SafeHeaders } from "@blackbox/protocol";
+import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
+
+const STANDARD_HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+const NEVER_PERSIST_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "set-cookie",
+]);
+
+function connectionTokens(headers: IncomingHttpHeaders): Set<string> {
+  const values = headers.connection;
+  const joined = Array.isArray(values) ? values.join(",") : (values ?? "");
+  return new Set(
+    joined
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0),
+  );
+}
+
+function values(value: string | string[] | undefined): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+export function headersForForwarding(
+  headers: IncomingHttpHeaders,
+  options: { readonly dropHost?: boolean } = {},
+): OutgoingHttpHeaders {
+  const connectionSpecific = connectionTokens(headers);
+  const result: OutgoingHttpHeaders = {};
+
+  for (const [originalName, originalValue] of Object.entries(headers)) {
+    const name = originalName.toLowerCase();
+    if (
+      STANDARD_HOP_BY_HOP_HEADERS.has(name) ||
+      connectionSpecific.has(name) ||
+      (options.dropHost === true && name === "host") ||
+      originalValue === undefined
+    ) {
+      continue;
+    }
+    result[name] = originalValue;
+  }
+  return result;
+}
+
+export function headersForPersistence(
+  headers: IncomingHttpHeaders,
+  additionalSensitiveNames: readonly string[] = [],
+): SafeHeaders {
+  const sensitive = new Set([
+    ...NEVER_PERSIST_HEADERS,
+    ...additionalSensitiveNames.map((name) => name.toLowerCase()),
+  ]);
+  const connectionSpecific = connectionTokens(headers);
+  const persisted: Record<string, string[]> = {};
+
+  for (const [originalName, originalValue] of Object.entries(headers)) {
+    const name = originalName.toLowerCase();
+    if (
+      sensitive.has(name) ||
+      STANDARD_HOP_BY_HOP_HEADERS.has(name) ||
+      connectionSpecific.has(name)
+    ) {
+      continue;
+    }
+    const normalizedValues = values(originalValue);
+    if (normalizedValues.length > 0) {
+      persisted[name] = normalizedValues;
+    }
+  }
+
+  return SafeHeadersSchema.parse(persisted);
+}

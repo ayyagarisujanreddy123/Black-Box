@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  ProxyConfigurationError,
+  ProxyLoopError,
+  UnsafeBindError,
+  headersForForwarding,
+  headersForPersistence,
+  isLoopbackHost,
+  resolveProxyConfiguration,
+} from "../src/index.js";
+
+describe("proxy configuration safety", () => {
+  it("resolves the loopback defaults", () => {
+    const configuration = resolveProxyConfiguration();
+
+    expect(configuration.listenHost).toBe("127.0.0.1");
+    expect(configuration.listenPort).toBe(4141);
+    expect(configuration.upstream.origin).toBe("https://api.openai.com");
+  });
+
+  it.each(["127.0.0.1", "127.23.4.5", "::1", "[::1]", "localhost."])(
+    "recognizes %s as loopback",
+    (host) => {
+      expect(isLoopbackHost(host)).toBe(true);
+    },
+  );
+
+  it("requires explicit consent for non-loopback listeners", () => {
+    expect(() => resolveProxyConfiguration({ listenHost: "0.0.0.0" })).toThrow(
+      UnsafeBindError,
+    );
+    expect(
+      resolveProxyConfiguration({
+        listenHost: "0.0.0.0",
+        allowNonLoopback: true,
+      }).listenHost,
+    ).toBe("0.0.0.0");
+  });
+
+  it.each(["127.0.0.1", "localhost", "[::1]"])(
+    "rejects a loop through %s",
+    (upstreamHost) => {
+      expect(() =>
+        resolveProxyConfiguration({
+          listenHost: "127.0.0.1",
+          listenPort: 4141,
+          upstream: `http://${upstreamHost}:4141`,
+        }),
+      ).toThrow(ProxyLoopError);
+    },
+  );
+
+  it.each([
+    "ftp://api.openai.com",
+    "https://user:secret@api.openai.com",
+    "https://api.openai.com/v1",
+    "https://api.openai.com?debug=true",
+  ])("rejects unsafe upstream origin %s", (upstream) => {
+    expect(() => resolveProxyConfiguration({ upstream })).toThrow(
+      ProxyConfigurationError,
+    );
+  });
+});
+
+describe("header forwarding and persistence boundaries", () => {
+  const incoming = {
+    authorization: "Bearer fixture-secret",
+    cookie: "session=fixture-cookie",
+    host: "127.0.0.1:4141",
+    connection: "keep-alive, x-private-hop",
+    "keep-alive": "timeout=5",
+    "x-private-hop": "drop-me",
+    "content-type": "application/json",
+    "x-request-id": ["request-1", "request-2"],
+  } as const;
+
+  it("forwards credentials in memory but removes hop-by-hop and proxy host fields", () => {
+    const forwarded = headersForForwarding(incoming, { dropHost: true });
+
+    expect(forwarded.authorization).toBe("Bearer fixture-secret");
+    expect(forwarded.cookie).toBe("session=fixture-cookie");
+    expect(forwarded.host).toBeUndefined();
+    expect(forwarded.connection).toBeUndefined();
+    expect(forwarded["keep-alive"]).toBeUndefined();
+    expect(forwarded["x-private-hop"]).toBeUndefined();
+    expect(forwarded["x-request-id"]).toEqual(["request-1", "request-2"]);
+  });
+
+  it("makes credentials structurally absent from persisted headers", () => {
+    const persisted = headersForPersistence(incoming);
+    const serialized = JSON.stringify(persisted);
+
+    expect(serialized).not.toContain("fixture-secret");
+    expect(serialized).not.toContain("fixture-cookie");
+    expect(persisted.authorization).toBeUndefined();
+    expect(persisted.cookie).toBeUndefined();
+    expect(persisted["content-type"]).toEqual(["application/json"]);
+  });
+
+  it("forwards response cookies to the caller without persisting them", () => {
+    const responseHeaders = {
+      "set-cookie": ["a=1; HttpOnly", "b=2; Secure"],
+      "content-type": "application/json",
+      connection: "close",
+    };
+
+    expect(headersForForwarding(responseHeaders)["set-cookie"]).toEqual([
+      "a=1; HttpOnly",
+      "b=2; Secure",
+    ]);
+    expect(
+      headersForPersistence(responseHeaders)["set-cookie"],
+    ).toBeUndefined();
+  });
+
+  it("supports configured sensitive headers case-insensitively", () => {
+    const persisted = headersForPersistence(
+      { "x-customer-token": "do-not-store", "x-safe": "keep" },
+      ["X-Customer-Token"],
+    );
+
+    expect(persisted["x-customer-token"]).toBeUndefined();
+    expect(persisted["x-safe"]).toEqual(["keep"]);
+  });
+});

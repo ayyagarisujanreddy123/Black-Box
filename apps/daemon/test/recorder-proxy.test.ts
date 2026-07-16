@@ -16,7 +16,11 @@ import {
 } from "@blackbox/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DurableNormalizationRunner, RecorderProxy } from "../src/index.js";
+import {
+  DurableNormalizationRunner,
+  RecorderProxy,
+  sessionScopedProxyBaseUrl,
+} from "../src/index.js";
 
 interface HttpResult {
   readonly status: number;
@@ -633,6 +637,39 @@ describe("byte-faithful recorder proxy", () => {
     expect(raw.protocol).toBe("unknown-openai-compatible");
     expect(raw.path).toBe("/v1/future-operation");
     expect(raw.query).toEqual({ mode: ["opaque"] });
+  });
+
+  it("rewrites a session-scoped wrapper route before forwarding", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+    const base = new URL(
+      sessionScopedProxyBaseUrl(
+        proxy.address()?.origin as string,
+        "session-wrapper-route",
+      ),
+    );
+    const body = Buffer.from("wrapper-route");
+
+    const result = await requestBytes(
+      base.origin,
+      `${base.pathname}/future-operation?mode=wrapper`,
+      body,
+    );
+    await proxy.flush();
+
+    expect(result.body).toEqual(
+      Buffer.concat([Buffer.from("upstream:"), body]),
+    );
+    expect(upstream.observations.at(-1)?.path).toBe(
+      "/v1/future-operation?mode=wrapper",
+    );
+    const raw = latestRawExchange(storage);
+    expect(raw).toMatchObject({
+      sessionId: "session-wrapper-route",
+      path: "/v1/future-operation",
+      query: { mode: ["wrapper"] },
+    });
   });
 
   it("rejects unsupported WebSocket upgrades explicitly", async () => {

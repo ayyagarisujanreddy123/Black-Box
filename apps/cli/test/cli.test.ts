@@ -27,8 +27,9 @@ import {
 class CapturedOutput implements CliOutput {
   value = "";
 
-  write(value: string): void {
-    this.value += value;
+  write(value: string | Uint8Array): void {
+    this.value +=
+      typeof value === "string" ? value : Buffer.from(value).toString("utf8");
   }
 
   clear(): void {
@@ -64,6 +65,19 @@ async function upstream(): Promise<string> {
       response.end('{"upstream":true}');
     }),
   );
+}
+
+async function eventually(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMilliseconds = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) {
+      throw new Error("Condition was not satisfied before timeout.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 function runtime(
@@ -240,6 +254,129 @@ describe("CLI daemon lifecycle", () => {
         paths,
       ),
     ).rejects.toBeInstanceOf(UnsafeControlOriginError);
+  });
+
+  it("runs a child in one proxy/process session and returns its exit code", async () => {
+    const root = await temporaryRoot();
+    const upstreamOrigin = await upstream();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const launch = async (configuration: ResolvedStartConfiguration) => {
+      const daemon = new BlackBoxDaemon({
+        homeDirectory: configuration.paths.homeDirectory,
+        proxy: {
+          ...configuration.proxy,
+          upstream: configuration.proxy.upstream,
+        },
+        control: {
+          listenHost: configuration.controlHost,
+          listenPort: configuration.controlPort,
+        },
+        shutdownGraceMilliseconds: 100,
+      });
+      daemons.push(daemon);
+      await daemon.start();
+      return process.pid;
+    };
+    const script = `
+      (async () => {
+        const response = await fetch(process.env.OPENAI_BASE_URL + "/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "fixture", input: "wrapped" })
+        });
+        const body = await response.text();
+        process.stdout.write(JSON.stringify({
+          base: process.env.OPENAI_BASE_URL,
+          session: process.env.BLACKBOX_SESSION_ID,
+          status: response.status,
+          body
+        }));
+        process.stderr.write("child-stderr\\n");
+        process.exitCode = 7;
+      })().catch((error) => {
+        process.stderr.write(String(error));
+        process.exitCode = 99;
+      });
+    `;
+
+    const exitCode = await runCli(
+      [
+        "run",
+        "--home",
+        root,
+        "--upstream",
+        upstreamOrigin,
+        "--proxy-port",
+        "0",
+        "--control-port",
+        "0",
+        "--",
+        process.execPath,
+        "-e",
+        script,
+      ],
+      runtime(stdout, stderr, launch),
+    );
+
+    expect(exitCode).toBe(7);
+    const childOutput = JSON.parse(stdout.value) as {
+      base: string;
+      session: string;
+      status: number;
+      body: string;
+    };
+    expect(childOutput).toMatchObject({
+      status: 200,
+      body: '{"upstream":true}',
+    });
+    expect(childOutput.base).toContain("/.blackbox/session/");
+    expect(childOutput.base).toMatch(/\/v1$/u);
+    expect(stderr.value).toBe("child-stderr\n");
+
+    const paths = resolveDaemonPaths(root);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      await eventually(() => {
+        const session = storage.sessions.get(childOutput.session);
+        return (
+          session?.status === "completed" &&
+          storage.events
+            .list(childOutput.session)
+            .events.some((event) => event.type === "model.response.completed")
+        );
+      });
+      const session = storage.sessions.getRequired(childOutput.session);
+      const events = storage.events.list(childOutput.session).events;
+      expect(session).toMatchObject({
+        captureLevel: "wrapped-process",
+        status: "completed",
+        command: { executable: process.execPath },
+      });
+      expect(events.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          "session.started",
+          "process.started",
+          "process.stdout",
+          "process.stderr",
+          "process.exited",
+          "session.ended",
+          "model.response.completed",
+        ]),
+      );
+      const rawRow = storage.unsafeDatabase
+        .prepare("SELECT id FROM raw_exchanges WHERE session_id = ?")
+        .get(childOutput.session) as { id: string };
+      expect(storage.rawExchanges.getRequired(rawRow.id).path).toBe(
+        "/v1/responses",
+      );
+    } finally {
+      storage.close();
+    }
   });
 });
 

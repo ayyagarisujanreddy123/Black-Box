@@ -41,6 +41,7 @@ import {
   type ProxyConfigurationInput,
 } from "./config.js";
 import { headersForForwarding, headersForPersistence } from "./headers.js";
+import { parseSessionScopedPath } from "./session-route.js";
 
 export interface RecorderProxyOptions extends ProxyConfigurationInput {
   readonly storage: BlackBoxStorage;
@@ -87,6 +88,7 @@ interface RequestTarget {
   readonly path: string;
   readonly query: Record<string, string[]>;
   readonly upstreamUrl: URL;
+  readonly sessionId?: string;
 }
 
 interface EvidenceState {
@@ -123,14 +125,23 @@ function parseRequestTarget(
   const rawTarget =
     requestUrl === undefined || requestUrl === "*" ? "/" : requestUrl;
   const parsed = new URL(rawTarget, "http://blackbox.invalid");
+  const scoped = parseSessionScopedPath(parsed.pathname);
+  if (
+    parsed.pathname.startsWith("/.blackbox/session/") &&
+    scoped === undefined
+  ) {
+    throw new TypeError("Invalid session-scoped proxy path.");
+  }
+  const path = scoped?.path ?? parsed.pathname;
   const query: Record<string, string[]> = {};
   for (const [name, value] of parsed.searchParams) {
     (query[name] ??= []).push(value);
   }
   return {
-    path: parsed.pathname,
+    path,
     query,
-    upstreamUrl: new URL(`${parsed.pathname}${parsed.search}`, upstream),
+    upstreamUrl: new URL(`${path}${parsed.search}`, upstream),
+    ...(scoped === undefined ? {} : { sessionId: scoped.sessionId }),
   };
 }
 
@@ -305,7 +316,10 @@ export class RecorderProxy {
     return (this.options.now ?? (() => new Date()))().toISOString();
   }
 
-  private ensureSession(request: IncomingMessage): SessionizationDecision {
+  private ensureSession(
+    request: IncomingMessage,
+    target: RequestTarget,
+  ): SessionizationDecision {
     const ancestorHeader = headerValue(
       request.headers,
       SESSION_SIGNAL_HEADERS.ancestry,
@@ -322,6 +336,15 @@ export class RecorderProxy {
       request.headers,
       SESSION_SIGNAL_HEADERS.explicit,
     );
+    if (
+      explicitSessionId !== undefined &&
+      target.sessionId !== undefined &&
+      explicitSessionId.trim() !== target.sessionId
+    ) {
+      throw new Error(
+        "The session-scoped proxy route conflicts with X-Blackbox-Session.",
+      );
+    }
     const adapterSessionId = headerValue(
       request.headers,
       SESSION_SIGNAL_HEADERS.adapter,
@@ -332,7 +355,9 @@ export class RecorderProxy {
         ...(analysisTargetSessionId === undefined
           ? {}
           : { analysisTargetSessionId }),
-        ...(explicitSessionId === undefined ? {} : { explicitSessionId }),
+        ...(explicitSessionId === undefined && target.sessionId === undefined
+          ? {}
+          : { explicitSessionId: explicitSessionId ?? target.sessionId }),
         ...(adapterSessionId === undefined ? {} : { adapterSessionId }),
         ...(ancestorHeader === undefined
           ? {}
@@ -414,7 +439,7 @@ export class RecorderProxy {
     request: IncomingMessage,
     target: RequestTarget,
   ): EvidenceState {
-    const sessionId = this.ensureSession(request).sessionId;
+    const sessionId = this.ensureSession(request, target).sessionId;
     const sequence = this.options.storage.sequences.reserve(sessionId)[0];
     if (sequence === undefined) {
       throw new Error(`Failed to allocate sequence for ${sessionId}.`);
@@ -479,7 +504,19 @@ export class RecorderProxy {
   ): Promise<void> {
     this.healthState.activeRequests += 1;
     this.healthState.requestsStarted += 1;
-    const target = parseRequestTarget(request.url, this.configuration.upstream);
+    let target: RequestTarget;
+    try {
+      target = parseRequestTarget(request.url, this.configuration.upstream);
+    } catch {
+      this.healthState.activeRequests -= 1;
+      this.healthState.requestsCompleted += 1;
+      response.writeHead(400, {
+        "content-type": "application/json",
+        connection: "close",
+      });
+      response.end(JSON.stringify({ error: { type: "invalid_proxy_path" } }));
+      return;
+    }
     let state: EvidenceState;
     try {
       state = this.createEvidenceState(request, target);

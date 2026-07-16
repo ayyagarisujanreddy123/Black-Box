@@ -8,7 +8,14 @@ import {
 } from "@blackbox/daemon";
 
 export type CliCommand =
-  "init" | "start" | "stop" | "status" | "doctor" | "sessions" | "inspect";
+  | "init"
+  | "start"
+  | "stop"
+  | "status"
+  | "doctor"
+  | "sessions"
+  | "inspect"
+  | "run";
 
 export interface ParsedCliArguments {
   readonly command?: CliCommand;
@@ -34,6 +41,7 @@ const COMMANDS = new Set<CliCommand>([
   "doctor",
   "sessions",
   "inspect",
+  "run",
 ]);
 
 const VALUE_FLAGS = new Set([
@@ -53,6 +61,8 @@ const VALUE_FLAGS = new Set([
   "limit",
   "type",
   "cursor",
+  "cwd",
+  "max-output-frame-bytes",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -100,6 +110,24 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   ]),
   sessions: new Set(["home", "limit", "json", "include-internal"]),
   inspect: new Set(["home", "limit", "type", "cursor", "json"]),
+  run: new Set([
+    "home",
+    "upstream",
+    "proxy-host",
+    "proxy-port",
+    "control-host",
+    "control-port",
+    "capture-queue-max-bytes",
+    "max-request-body-bytes",
+    "max-response-body-bytes",
+    "max-chunk-manifest-entries",
+    "upstream-timeout-ms",
+    "shutdown-grace-ms",
+    "timeout-ms",
+    "allow-non-loopback",
+    "cwd",
+    "max-output-frame-bytes",
+  ]),
 };
 
 export class CliUsageError extends Error {
@@ -128,14 +156,28 @@ export function parseCliArguments(
   const flags = new Map<string, string | true>();
   const positionals: string[] = [];
   let help = false;
+  let separatorFound = false;
 
   for (let index = 1; index < arguments_.length; index += 1) {
     const token = arguments_[index] as string;
+    if (token === "--") {
+      if (command !== "run") {
+        throw new CliUsageError(`Command ${command} does not accept '--'.`);
+      }
+      separatorFound = true;
+      positionals.push(...arguments_.slice(index + 1));
+      break;
+    }
     if (token === "--help" || token === "-h") {
       help = true;
       continue;
     }
     if (!token.startsWith("--")) {
+      if (command === "run") {
+        throw new CliUsageError(
+          `Run command argument '${token}' must follow '--'.`,
+        );
+      }
       positionals.push(token);
       continue;
     }
@@ -174,7 +216,11 @@ export function parseCliArguments(
       throw new CliUsageError(`Flag --${name} is not valid for ${command}.`);
     }
   }
-  if (command === "inspect") {
+  if (command === "run") {
+    if (!help && (!separatorFound || positionals.length === 0)) {
+      throw new CliUsageError("run requires '--' followed by a command.");
+    }
+  } else if (command === "inspect") {
     if (!help && positionals.length !== 1) {
       throw new CliUsageError("inspect requires exactly one session ID.");
     }

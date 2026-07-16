@@ -1,4 +1,8 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
+import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -8,6 +12,7 @@ import {
   ensureInstallLayout,
   isProcessAlive,
   readDaemonLockRecord,
+  sessionScopedProxyBaseUrl,
   type DaemonLockRecord,
   type DaemonPaths,
   type DaemonStatus,
@@ -22,6 +27,7 @@ import {
   resolveStartConfiguration,
   stringFlag,
   type ParsedCliArguments,
+  type ResolvedStartConfiguration,
 } from "./configuration.js";
 import {
   requestDaemonShutdown,
@@ -29,6 +35,10 @@ import {
 } from "./control-client.js";
 import { launchDaemonProcess, type DaemonLauncher } from "./daemon-launcher.js";
 import { runDoctor, type DoctorReport } from "./doctor.js";
+import {
+  DEFAULT_PROCESS_RUN_CONFIGURATION,
+  RunEventJournal,
+} from "./run/run-event-journal.js";
 
 const HELP = `Black Box — the flight recorder for AI coding agents
 
@@ -40,6 +50,7 @@ Usage:
   blackbox doctor [--upstream URL] [--websocket] [--json]
   blackbox sessions [--limit N] [--json]
   blackbox inspect <session-id> [--limit N] [--type EVENT_TYPE] [--json]
+  blackbox run [--cwd PATH] -- <command...>
 
 Common options:
   --home PATH                     Override the private Black Box data directory
@@ -63,10 +74,14 @@ Inspection options:
   --type EVENT_TYPE               Filter inspect output by canonical event type
   --cursor CURSOR                 Continue inspect from a prior JSON page
   --include-internal              Include isolated analysis sessions in listings
+
+Run options:
+  --cwd PATH                      Child working directory (default current directory)
+  --max-output-frame-bytes N      Maximum stored stdout/stderr frame (default 262144)
 `;
 
 export interface CliOutput {
-  write(value: string): unknown;
+  write(value: string | Uint8Array): unknown;
 }
 
 export interface CliRuntime {
@@ -74,6 +89,7 @@ export interface CliRuntime {
   readonly stderr: CliOutput;
   readonly environment: NodeJS.ProcessEnv;
   readonly launchDaemon: DaemonLauncher;
+  readonly now: () => Date;
 }
 
 const DEFAULT_RUNTIME: CliRuntime = {
@@ -81,6 +97,7 @@ const DEFAULT_RUNTIME: CliRuntime = {
   stderr: process.stderr,
   environment: process.env,
   launchDaemon: launchDaemonProcess,
+  now: () => new Date(),
 };
 
 function timeoutFromArguments(
@@ -223,6 +240,28 @@ async function commandStart(
     parsed.flags,
     runtime.environment,
   );
+  const { status, alreadyRunning } = await ensureDaemonReady(
+    configuration,
+    runtime,
+  );
+  writeStatus(
+    runtime.stdout,
+    status,
+    false,
+    alreadyRunning
+      ? "Black Box daemon already running"
+      : "Black Box daemon started",
+  );
+  return 0;
+}
+
+async function ensureDaemonReady(
+  configuration: ResolvedStartConfiguration,
+  runtime: CliRuntime,
+): Promise<{
+  readonly status: DaemonStatus;
+  readonly alreadyRunning: boolean;
+}> {
   let active: DaemonLockRecord | undefined;
   try {
     active = await readActiveLock(configuration.paths);
@@ -240,13 +279,7 @@ async function commandStart(
       configuration.paths,
       configuration.readinessTimeoutMilliseconds,
     );
-    writeStatus(
-      runtime.stdout,
-      status,
-      false,
-      "Black Box daemon already running",
-    );
-    return 0;
+    return { status, alreadyRunning: true };
   }
 
   await initialize(configuration.paths);
@@ -255,8 +288,198 @@ async function commandStart(
     configuration.paths,
     configuration.readinessTimeoutMilliseconds,
   );
-  writeStatus(runtime.stdout, status, false, "Black Box daemon started");
-  return 0;
+  return { status, alreadyRunning: false };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  return typeof error.code === "string" ? error.code : undefined;
+}
+
+function childExitStatus(
+  exitCode: number | null,
+  signal: string | null,
+): number {
+  if (exitCode !== null) {
+    return exitCode;
+  }
+  if (signal === null) {
+    return 1;
+  }
+  const signalNumber = (osConstants.signals as Record<string, number>)[signal];
+  return 128 + (signalNumber ?? 0);
+}
+
+async function commandRun(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const executable = parsed.positionals[0];
+  if (executable === undefined) {
+    throw new CliUsageError("run requires '--' followed by a command.");
+  }
+  const configuration = resolveStartConfiguration(
+    parsed.flags,
+    runtime.environment,
+  );
+  const { status } = await ensureDaemonReady(configuration, runtime);
+  const cwd = resolve(stringFlag(parsed.flags, "cwd") ?? process.cwd());
+  const sessionId = `session-run-${randomUUID()}`;
+  const startedAt = runtime.now().toISOString();
+  const storage = await openBlackBoxStorage({
+    databasePath: configuration.paths.databasePath,
+    dataDirectory: configuration.paths.dataDirectory,
+    recoverIncompleteExchanges: false,
+  });
+  const journal = new RunEventJournal(storage, {
+    schemaVersion: 1,
+    sessionId,
+    executable,
+    arguments: parsed.positionals.slice(1),
+    cwd,
+    startedAt,
+    configuration: {
+      ...DEFAULT_PROCESS_RUN_CONFIGURATION,
+      excludedPathSegments: [
+        ...DEFAULT_PROCESS_RUN_CONFIGURATION.excludedPathSegments,
+      ],
+      maxOutputFrameBytes: integerFlag(
+        parsed.flags,
+        "max-output-frame-bytes",
+        DEFAULT_PROCESS_RUN_CONFIGURATION.maxOutputFrameBytes,
+        1,
+        1024 * 1024,
+      ),
+    },
+  });
+  let recordingFailure: unknown;
+  const observe = (operation: Promise<void>) => {
+    void operation.catch((error: unknown) => {
+      recordingFailure ??= error;
+    });
+  };
+
+  try {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(executable, parsed.positionals.slice(1), {
+        cwd,
+        env: {
+          ...runtime.environment,
+          OPENAI_BASE_URL: sessionScopedProxyBaseUrl(
+            status.proxyOrigin,
+            sessionId,
+          ),
+          BLACKBOX_PROXY_ORIGIN: status.proxyOrigin,
+          BLACKBOX_SESSION_ID: sessionId,
+          BLACKBOX_CAPTURE_LEVEL: "wrapped-process",
+        },
+        shell: false,
+        stdio: ["inherit", "pipe", "pipe"],
+      });
+    } catch (error: unknown) {
+      const spawnCode = errorCode(error);
+      await journal
+        .fail({
+          message: errorMessage(error),
+          ...(spawnCode === undefined ? {} : { code: spawnCode }),
+          failedAt: runtime.now().toISOString(),
+        })
+        .catch(() => undefined);
+      runtime.stderr.write(
+        `blackbox: failed to spawn ${executable}: ${errorMessage(error)}\n`,
+      );
+      return 127;
+    }
+
+    const outcome = new Promise<
+      | { readonly kind: "spawn-error"; readonly error: unknown }
+      | {
+          readonly kind: "closed";
+          readonly exitCode: number | null;
+          readonly signal: string | null;
+        }
+    >((resolveOutcome) => {
+      child.once("error", (error) => {
+        if (child.pid === undefined) {
+          resolveOutcome({ kind: "spawn-error", error });
+        } else {
+          recordingFailure ??= error;
+        }
+      });
+      child.once("close", (exitCode, signal) => {
+        resolveOutcome({ kind: "closed", exitCode, signal });
+      });
+    });
+
+    if (child.pid !== undefined) {
+      observe(journal.recordStarted(child.pid, runtime.now().toISOString()));
+    }
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const bytes = Buffer.from(chunk);
+      runtime.stdout.write(bytes);
+      try {
+        observe(
+          journal.appendOutput("stdout", bytes, runtime.now().toISOString()),
+        );
+      } catch (error: unknown) {
+        recordingFailure ??= error;
+      }
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const bytes = Buffer.from(chunk);
+      runtime.stderr.write(bytes);
+      try {
+        observe(
+          journal.appendOutput("stderr", bytes, runtime.now().toISOString()),
+        );
+      } catch (error: unknown) {
+        recordingFailure ??= error;
+      }
+    });
+
+    const result = await outcome;
+    if (result.kind === "spawn-error") {
+      const spawnCode = errorCode(result.error);
+      await journal
+        .fail({
+          message: errorMessage(result.error),
+          ...(spawnCode === undefined ? {} : { code: spawnCode }),
+          failedAt: runtime.now().toISOString(),
+        })
+        .catch((error: unknown) => {
+          recordingFailure ??= error;
+        });
+      runtime.stderr.write(
+        `blackbox: failed to spawn ${executable}: ${errorMessage(result.error)}\n`,
+      );
+      return 127;
+    }
+
+    await journal
+      .finish({
+        exitCode: result.exitCode,
+        signal: result.signal,
+        endedAt: runtime.now().toISOString(),
+      })
+      .catch((error: unknown) => {
+        recordingFailure ??= error;
+      });
+    if (recordingFailure !== undefined) {
+      runtime.stderr.write(
+        `blackbox: process evidence is incomplete: ${errorMessage(recordingFailure)}\n`,
+      );
+    }
+    return childExitStatus(result.exitCode, result.signal);
+  } finally {
+    storage.close();
+  }
 }
 
 async function commandStatus(
@@ -527,6 +750,8 @@ export async function runCli(
         return await commandSessions(parsed, runtime);
       case "inspect":
         return await commandInspect(parsed, runtime);
+      case "run":
+        return await commandRun(parsed, runtime);
     }
   } catch (error: unknown) {
     const usage = error instanceof CliUsageError;

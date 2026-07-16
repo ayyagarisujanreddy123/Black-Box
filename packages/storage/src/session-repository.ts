@@ -13,6 +13,49 @@ interface SessionRow {
   readonly output_tokens: number | null;
 }
 
+interface SessionCursor {
+  readonly startedAt: string;
+  readonly id: string;
+}
+
+export interface SessionListOptions {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly includeInternal?: boolean;
+}
+
+export interface SessionCursorPage {
+  readonly sessions: Session[];
+  readonly nextCursor?: string;
+}
+
+function encodeCursor(cursor: SessionCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string): SessionCursor {
+  if (cursor.length === 0 || cursor.length > 4096) {
+    throw new RangeError("Invalid session cursor.");
+  }
+  try {
+    const value = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as Partial<SessionCursor>;
+    if (
+      typeof value.startedAt !== "string" ||
+      !Number.isFinite(Date.parse(value.startedAt)) ||
+      typeof value.id !== "string" ||
+      value.id.length === 0 ||
+      value.id.length > 512
+    ) {
+      throw new Error("invalid cursor fields");
+    }
+    return { startedAt: value.startedAt, id: value.id };
+  } catch (error: unknown) {
+    throw new RangeError("Invalid session cursor.", { cause: error });
+  }
+}
+
 function hydrateSession(row: SessionRow): Session {
   const stored = JSON.parse(row.record_json) as Record<string, unknown>;
   const hydrated: Record<string, unknown> = {
@@ -167,17 +210,54 @@ export class SessionRepository {
   }
 
   list(limit = 100): Session[] {
-    const boundedLimit = Math.max(1, Math.min(limit, 1000));
+    return this.listPage({ limit, includeInternal: true }).sessions;
+  }
+
+  listPage(options: SessionListOptions = {}): SessionCursorPage {
+    const limit = Math.max(1, Math.min(options.limit ?? 100, 1000));
+    const cursor =
+      options.cursor === undefined
+        ? { startedAt: "", id: "" }
+        : decodeCursor(options.cursor);
     const rows = this.database
       .prepare(
         `SELECT record_json, ended_at, status, event_count, error_count,
                 input_tokens, output_tokens
          FROM sessions
+         WHERE (
+           @startedAt = '' OR
+           started_at < @startedAt OR
+           (started_at = @startedAt AND id < @id)
+         )
+           AND (
+             @includeInternal = 1 OR
+             COALESCE(json_extract(metadata_json, '$.internalAnalysis'), 0) <> 1
+           )
          ORDER BY started_at DESC, id DESC
-         LIMIT ?`,
+         LIMIT @fetchLimit`,
       )
-      .all(boundedLimit) as SessionRow[];
-    return rows.map(hydrateSession);
+      .all({
+        startedAt: cursor.startedAt,
+        id: cursor.id,
+        includeInternal: options.includeInternal === true ? 1 : 0,
+        fetchLimit: limit + 1,
+      }) as SessionRow[];
+    const hasMore = rows.length > limit;
+    const sessions = (hasMore ? rows.slice(0, limit) : rows).map(
+      hydrateSession,
+    );
+    const last = sessions.at(-1);
+    return {
+      sessions,
+      ...(hasMore && last !== undefined
+        ? {
+            nextCursor: encodeCursor({
+              startedAt: last.startedAt,
+              id: last.id,
+            }),
+          }
+        : {}),
+    };
   }
 }
 

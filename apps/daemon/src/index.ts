@@ -5,6 +5,7 @@ export * from "./lifecycle/daemon.js";
 export * from "./lifecycle/paths.js";
 export * from "./lifecycle/status.js";
 export * from "./normalization/normalization-runner.js";
+export * from "./query/evidence-query-service.js";
 export * from "./proxy/capture.js";
 export * from "./proxy/config.js";
 export * from "./proxy/errors.js";

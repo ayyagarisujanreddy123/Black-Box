@@ -5,6 +5,7 @@ import {
   RawExchangeParseStatusSchema,
   RawExchangeSchema,
   type BlackBoxEvent,
+  type EvidenceSource,
   type RawExchange,
   type RawExchangeParseStatus,
 } from "@blackbox/protocol";
@@ -35,6 +36,9 @@ export interface EventListOptions {
   readonly cursor?: string;
   readonly limit?: number;
   readonly type?: string;
+  readonly source?: EvidenceSource;
+  readonly occurredAfter?: string;
+  readonly occurredBefore?: string;
 }
 
 export interface NormalizationInput {
@@ -267,6 +271,9 @@ export class EventRepository {
          WHERE session_id = @sessionId
            AND (sequence > @sequence OR (sequence = @sequence AND id > @id))
            AND (@type IS NULL OR type = @type)
+           AND (@source IS NULL OR source = @source)
+           AND (@occurredAfter IS NULL OR occurred_at >= @occurredAfter)
+           AND (@occurredBefore IS NULL OR occurred_at <= @occurredBefore)
          ORDER BY sequence ASC, id ASC
          LIMIT @fetchLimit`,
       )
@@ -275,6 +282,9 @@ export class EventRepository {
         sequence: cursor.sequence,
         id: cursor.id,
         type: options.type ?? null,
+        source: options.source ?? null,
+        occurredAfter: options.occurredAfter ?? null,
+        occurredBefore: options.occurredBefore ?? null,
         fetchLimit: limit + 1,
       }) as EventRow[];
     const hasMore = rows.length > limit;

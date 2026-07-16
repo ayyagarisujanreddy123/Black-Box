@@ -3,6 +3,7 @@ export * from "./common.js";
 export * from "./context.js";
 export * from "./event.js";
 export * from "./process.js";
+export * from "./query.js";
 export * from "./raw-exchange.js";
 export * from "./report.js";
 export * from "./session.js";

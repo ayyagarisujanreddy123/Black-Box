@@ -1,6 +1,13 @@
 import { execFile } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -94,6 +101,34 @@ async function eventuallyStopped(pid: number): Promise<void> {
 
 it("runs the packaged CLI and detached recorder end to end", async () => {
   const root = await mkdtemp(join(tmpdir(), "blackbox-packaged-e2e-"));
+  const workspace = await mkdtemp(
+    join(tmpdir(), "blackbox-packaged-workspace-e2e-"),
+  );
+  await writeFile(join(workspace, "delete-me.txt"), "tracked deletion\n");
+  await execute("git", ["-C", workspace, "init", "--quiet"]);
+  await execute("git", [
+    "-C",
+    workspace,
+    "config",
+    "user.email",
+    "blackbox@example.test",
+  ]);
+  await execute("git", [
+    "-C",
+    workspace,
+    "config",
+    "user.name",
+    "Black Box E2E",
+  ]);
+  await execute("git", ["-C", workspace, "add", "."]);
+  await execute("git", [
+    "-C",
+    workspace,
+    "commit",
+    "--quiet",
+    "-m",
+    "packaged baseline",
+  ]);
   const observations: {
     headers: Record<string, string | string[] | undefined>;
     body: Buffer;
@@ -241,6 +276,75 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       "model.response.completed",
     ]);
 
+    const wrappedScript = `
+      (async () => {
+        const fs = require("node:fs");
+        const response = await fetch(process.env.OPENAI_BASE_URL + "/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input: "packaged wrapped request" })
+        });
+        await response.arrayBuffer();
+        fs.unlinkSync("delete-me.txt");
+        fs.writeFileSync("created.txt", "packaged creation\\n");
+        process.stdout.write(JSON.stringify({
+          sessionId: process.env.BLACKBOX_SESSION_ID,
+          proxyOrigin: process.env.BLACKBOX_PROXY_ORIGIN
+        }));
+      })().catch((error) => {
+        process.stderr.write(String(error));
+        process.exitCode = 1;
+      });
+    `;
+    const wrappedResult = await runCli([
+      "run",
+      "--home",
+      root,
+      "--cwd",
+      workspace,
+      "--watcher-debounce-ms",
+      "10",
+      "--cleanup-timeout-ms",
+      "5000",
+      "--",
+      process.execPath,
+      "-e",
+      wrappedScript,
+    ]);
+    expect(wrappedResult.stderr).toBe("");
+    const wrappedOutput = JSON.parse(wrappedResult.stdout) as {
+      sessionId: string;
+      proxyOrigin: string;
+    };
+    expect(wrappedOutput.proxyOrigin).toBe(status.proxyOrigin);
+
+    let wrappedInspection: Inspection | undefined;
+    const wrappedDeadline = Date.now() + 2_000;
+    while (Date.now() < wrappedDeadline) {
+      const candidate = JSON.parse(
+        (
+          await runCli([
+            "inspect",
+            wrappedOutput.sessionId,
+            "--home",
+            root,
+            "--json",
+          ])
+        ).stdout,
+      ) as Inspection;
+      const types = candidate.events.map((event) => event.type);
+      if (
+        types.includes("model.response.completed") &&
+        types.includes("file.delete") &&
+        types.includes("process.exited")
+      ) {
+        wrappedInspection = candidate;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(wrappedInspection).toBeDefined();
+
     const stopped = await runCli(["stop", "--home", root]);
     expect(stopped.stderr).toBe("");
     expect(stopped.stdout).toContain("daemon stopped");
@@ -255,11 +359,63 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       recoverIncompleteExchanges: false,
     });
     try {
+      const wrappedSession = storage.sessions.getRequired(
+        wrappedOutput.sessionId,
+      );
+      expect(wrappedSession).toMatchObject({
+        status: "completed",
+        captureLevel: "wrapped-process",
+        repoRoot: await realpath(workspace),
+      });
+      const wrappedEvents = storage.events.list(wrappedOutput.sessionId, {
+        limit: 1000,
+      }).events;
+      expect(wrappedEvents.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          "workspace.snapshot",
+          "process.started",
+          "file.delete",
+          "file.create",
+          "process.exited",
+          "model.response.completed",
+        ]),
+      );
+      const deletion = wrappedEvents.find(
+        (event) =>
+          event.type === "file.delete" &&
+          event.summary.timingPrecision === "exact-final-diff",
+      );
+      expect(deletion).toMatchObject({
+        source: "filesystem",
+        summary: {
+          path: "delete-me.txt",
+          payloadKind: "git-binary-patch",
+          timingPrecision: "exact-final-diff",
+        },
+      });
+      expect(
+        storage.fileChanges.getByEvent(deletion?.id as string),
+      ).toMatchObject({
+        operation: "delete",
+        path: "delete-me.txt",
+        beforeHash: expect.stringMatching(/^[a-f\d]{64}$/u),
+        patchBlobId: deletion?.payloadRef?.id,
+      });
+      expect(
+        Buffer.from(
+          await storage.blobs.get(deletion?.payloadRef?.id as string),
+        ).toString("utf8"),
+      ).toContain("tracked deletion");
+
+      const directSessionId = inspection?.session.id;
+      expect(directSessionId).toBeDefined();
       const row = storage.unsafeDatabase
         .prepare(
-          "SELECT id FROM raw_exchanges ORDER BY created_at DESC LIMIT 1",
+          `SELECT id FROM raw_exchanges
+           WHERE session_id = ?
+           ORDER BY created_at DESC LIMIT 1`,
         )
-        .get() as { id: string };
+        .get(directSessionId as string) as { id: string };
       const raw = storage.rawExchanges.getRequired(row.id);
       expect(raw.outcome).toBe("completed");
       expect(raw.requestHeaders.authorization).toBeUndefined();
@@ -303,5 +459,6 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     }
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
   }
 });

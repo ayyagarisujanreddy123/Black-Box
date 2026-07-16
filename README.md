@@ -6,7 +6,7 @@ Black Box is being built as a CLI-managed localhost recorder with a browser cock
 
 ## Current status
 
-Milestones M0 through M3 provide a runnable, byte-faithful local recorder with canonical evidence:
+Milestones M0 through M4 provide a runnable, byte-faithful local recorder with canonical process and workspace evidence:
 
 - strict npm/TypeScript workspace boundaries;
 - versioned Zod contracts for sessions, raw exchanges, canonical events, reconstructed context, blame results, and incident reports;
@@ -27,9 +27,13 @@ Milestones M0 through M3 provide a runnable, byte-faithful local recorder with c
 - durable off-path normalization, parser-error evidence, unknown-event retention, and explicit first-wins replay/conflict handling;
 - explicit, adapter, known-ancestry, and bounded idle-window session assignment with isolated internal analysis sessions;
 - per-session capture and normalizer-version snapshots;
-- working `blackbox sessions` and `blackbox inspect` commands for canonical event JSON.
+- working `blackbox sessions` and `blackbox inspect` commands for canonical event JSON;
+- working `blackbox run -- <command...>` with daemon reuse, session-scoped proxy injection, command metadata, byte-exact bounded stdout/stderr frames, and child exit-status preservation;
+- Git-aware and plain-directory baseline/final manifests with streamed SHA-256 hashes, tracked binary patches, and bounded file-content deltas;
+- separate debounced `approximate-watcher` timing and authoritative `exact-final-diff` file evidence, including create, modify, delete, and unchanged-content rename detection;
+- canonical-root path exclusions, Git-ignore handling, non-followed directory symlinks, bounded watcher state, Ctrl-C/SIGTERM forwarding, and abortable final cleanup.
 
-HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Process/filesystem observation begins in M4; the browser query API and viewer begin in M5. Deterministic and optional model analysis arrive in later milestones.
+HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Wrapped process/filesystem observation is available at capture level L2; the browser query API and viewer begin in M5. Deterministic and optional model analysis arrive in later milestones.
 
 ## Development quickstart
 
@@ -49,6 +53,7 @@ npm run blackbox -- doctor
 npm run blackbox -- start
 npm run blackbox -- status
 # Point an OpenAI-compatible client at the OPENAI_BASE_URL printed by start.
+npm run blackbox -- run -- <agent-command> [arguments...]
 npm run blackbox -- sessions
 npm run blackbox -- inspect <session-id> --json
 npm run blackbox -- stop
@@ -57,6 +62,19 @@ npm run blackbox -- stop
 Use `--home PATH` or `BLACKBOX_HOME` to select the private data directory. Configure the provider with `--upstream URL` or `BLACKBOX_UPSTREAM_URL`; Black Box deliberately never treats `OPENAI_BASE_URL` as its upstream because that variable points clients back to the recorder.
 
 Session assignment follows explicit `X-Blackbox-Session`, adapter `X-Blackbox-Agent-Session`, known `X-Blackbox-Response-Ancestor`, and short client-idle grouping in that order. Internal model analysis must set `X-Blackbox-Analysis-Session` and may identify the investigated session with `X-Blackbox-Analysis-Target`; analysis isolation overrides all ordinary grouping signals. These reserved headers are recorder controls and are neither forwarded upstream nor retained in raw request headers.
+
+## Wrapped process and workspace evidence
+
+`blackbox run [--cwd PATH] -- <command...>` starts or reuses the daemon, assigns one explicit wrapped-process session, and injects a session-scoped `OPENAI_BASE_URL`. API traffic, process output, and workspace effects therefore share a session without requiring the child to construct recorder headers. The wrapper mirrors stdout/stderr and returns the child's exit code; Ctrl-C and SIGTERM are forwarded while Black Box retains a bounded cleanup window.
+
+Before launch, the wrapper records a Git-aware or plain-directory baseline. At completion it compares that baseline directly with a new manifest, so unchanged pre-existing dirt is not attributed to the child. Small baseline-clean tracked changes retain `git diff --binary` evidence; small untracked, baseline-dirty, and non-Git changes retain a base64 file delta. Files above `--max-untracked-file-bytes` (1 MiB by default) remain hash-only. Known credential-file names such as `.env`, private keys, and credential files are also hash-only.
+
+Filesystem timing has two deliberately distinct precision labels:
+
+- `approximate-watcher` events are debounced observations made while the child runs. They can preserve useful timing and some transient effects, but OS watcher delivery is not an exact mutation clock.
+- `exact-final-diff` events are authoritative baseline-to-final state differences. The same effect can appear once in each precision class; consumers should not silently treat them as two independent mutations.
+
+Capture is restricted to the canonical Git/directory root. Black Box excludes `.git`, dependency/build/cache directories, its own home directory, and untracked Git-ignored paths. It records a symlink's target text but never traverses a directory symlink, and it does not claim to audit writes elsewhere on the operating system. Use `--watcher-debounce-ms`, `--cleanup-timeout-ms`, and `--max-untracked-file-bytes` to adjust the exposed bounds.
 
 Useful individual commands:
 

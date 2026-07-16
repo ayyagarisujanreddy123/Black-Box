@@ -17,11 +17,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: [
-      "apps/*/test/**/*.test.ts",
-      "packages/*/test/**/*.test.ts",
-      "test/**/*.test.ts",
-    ],
+    include: ["apps/*/test/**/*.test.ts", "packages/*/test/**/*.test.ts"],
     passWithNoTests: false,
     restoreMocks: true,
   },

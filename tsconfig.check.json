@@ -13,6 +13,7 @@
     "apps/*/src/**/*.tsx",
     "packages/*/src/**/*.ts",
     "packages/*/test/**/*.ts",
+    "test/e2e/**/*.ts",
     "vitest*.config.ts"
   ]
 }

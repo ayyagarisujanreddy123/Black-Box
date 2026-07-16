@@ -4,10 +4,10 @@ import {
   type IncomingHttpHeaders,
   type Server,
 } from "node:http";
+import { connect, type AddressInfo } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 import {
   ChunkManifestSchema,
@@ -271,6 +271,14 @@ describe("byte-faithful recorder proxy", () => {
     const raw = latestRawExchange(storage);
     expect(raw.sessionId).toBe("session-explicit");
     expect(raw.outcome).toBe("completed");
+    expect(raw.firstByteAt).toBeDefined();
+    expect(raw.endedAt).toBeDefined();
+    expect(Date.parse(raw.firstByteAt as string)).toBeGreaterThanOrEqual(
+      Date.parse(raw.startedAt),
+    );
+    expect(Date.parse(raw.endedAt as string)).toBeGreaterThanOrEqual(
+      Date.parse(raw.firstByteAt as string),
+    );
     expect(raw.requestHeaders.authorization).toBeUndefined();
     expect(raw.requestHeaders.cookie).toBeUndefined();
     expect(raw.responseHeaders?.["set-cookie"]).toBeUndefined();
@@ -382,6 +390,35 @@ describe("byte-faithful recorder proxy", () => {
     expect(raw.query).toEqual({ mode: ["opaque"] });
   });
 
+  it("rejects unsupported WebSocket upgrades explicitly", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+    const address = proxy.address();
+    if (address === undefined) {
+      throw new Error("Expected proxy address.");
+    }
+
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connect(address.port, address.host);
+      const chunks: Buffer[] = [];
+      socket.on("connect", () => {
+        socket.write(
+          "GET /v1/responses HTTP/1.1\r\n" +
+            `Host: ${address.host}:${address.port}\r\n` +
+            "Connection: Upgrade\r\n" +
+            "Upgrade: websocket\r\n\r\n",
+        );
+      });
+      socket.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      socket.on("end", () => resolve(Buffer.concat(chunks).toString("ascii")));
+      socket.on("error", reject);
+    });
+
+    expect(response).toMatch(/^HTTP\/1\.1 426 Upgrade Required\r\n/u);
+    expect(upstream.observations).toHaveLength(0);
+  });
+
   it("bounds capture memory without truncating forwarded traffic", async () => {
     const upstream = await makeUpstream();
     const { storage } = await makeStorage();
@@ -473,7 +510,10 @@ describe("transport failure evidence", () => {
     await proxy.flush();
 
     expect(result.status).toBe(502);
-    expect(latestRawExchange(storage).outcome).toBe("timeout");
+    const raw = latestRawExchange(storage);
+    expect(raw.outcome).toBe("timeout");
+    expect(raw.firstByteAt).toBeUndefined();
+    expect(raw.endedAt).toBeDefined();
     expect(proxy.health().upstreamFailures).toBe(1);
   });
 

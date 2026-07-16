@@ -1,6 +1,6 @@
 # Black Box Execution Plan
 
-Status: M0–M1 complete; M2 ready to execute
+Status: M0–M2 complete; M3 ready to execute
 
 Version: 0.1
 
@@ -125,6 +125,8 @@ Acceptance:
 Exit artifact: storage package usable independently from the proxy.
 
 ### M2 — Byte-faithful proxy and CLI lifecycle
+
+Implementation status: Complete on 2026-07-16. The exit artifact is covered by byte-for-byte proxy tests and a packaged detached-process end-to-end test.
 
 Goal: record real HTTP traffic without breaking the caller.
 

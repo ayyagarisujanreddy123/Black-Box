@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BoundedByteCapture,
+  CaptureMemoryBudget,
   ProxyConfigurationError,
   ProxyLoopError,
   UnsafeBindError,
@@ -9,6 +11,29 @@ import {
   isLoopbackHost,
   resolveProxyConfiguration,
 } from "../src/index.js";
+
+describe("bounded capture memory", () => {
+  it("shares a strict global budget and retains prefixes only", () => {
+    const budget = new CaptureMemoryBudget(64);
+    const first = new BoundedByteCapture(64, budget);
+    const second = new BoundedByteCapture(64, budget);
+
+    first.append(Buffer.alloc(48, 1));
+    second.append(Buffer.alloc(48, 2));
+    expect(budget.usedBytes).toBe(64);
+    expect(first.retainedBytes).toBe(48);
+    expect(second.retainedBytes).toBe(16);
+    expect(second.droppedBytes).toBe(32);
+
+    first.release();
+    second.append(Buffer.alloc(16, 3));
+    expect(second.retainedBytes).toBe(16);
+    expect(second.droppedBytes).toBe(48);
+    expect(budget.usedBytes).toBe(16);
+    second.release();
+    expect(budget.usedBytes).toBe(0);
+  });
+});
 
 describe("proxy configuration safety", () => {
   it("resolves the loopback defaults", () => {

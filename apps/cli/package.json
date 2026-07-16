@@ -7,5 +7,9 @@
     "blackbox": "./dist/bin.js"
   },
   "exports": "./dist/index.js",
-  "types": "./dist/index.d.ts"
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@blackbox/daemon": "0.0.0",
+    "@blackbox/storage": "0.0.0"
+  }
 }

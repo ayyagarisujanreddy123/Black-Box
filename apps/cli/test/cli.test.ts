@@ -1,0 +1,344 @@
+import { createServer, type Server } from "node:http";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  BlackBoxDaemon,
+  readControlToken,
+  resolveDaemonPaths,
+  type DaemonPaths,
+} from "@blackbox/daemon";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  UnsafeControlOriginError,
+  parseCliArguments,
+  requestDaemonStatus,
+  resolveStartConfiguration,
+  runCli,
+  type CliOutput,
+  type CliRuntime,
+  type ResolvedStartConfiguration,
+} from "../src/index.js";
+
+class CapturedOutput implements CliOutput {
+  value = "";
+
+  write(value: string): void {
+    this.value += value;
+  }
+
+  clear(): void {
+    this.value = "";
+  }
+}
+
+const roots: string[] = [];
+const daemons: BlackBoxDaemon[] = [];
+const servers: Server[] = [];
+
+async function temporaryRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "blackbox-cli-test-"));
+  roots.push(root);
+  return root;
+}
+
+async function listen(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  servers.push(server);
+  const address = server.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function upstream(): Promise<string> {
+  return listen(
+    createServer((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"upstream":true}');
+    }),
+  );
+}
+
+function runtime(
+  stdout: CapturedOutput,
+  stderr: CapturedOutput,
+  launchDaemon?: (configuration: ResolvedStartConfiguration) => Promise<number>,
+): Partial<CliRuntime> {
+  return {
+    stdout,
+    stderr,
+    environment: {},
+    ...(launchDaemon === undefined ? {} : { launchDaemon }),
+  };
+}
+
+afterEach(async () => {
+  for (const daemon of daemons.splice(0)) {
+    await daemon.stop().catch(() => undefined);
+  }
+  for (const server of servers.splice(0)) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
+});
+
+describe("CLI initialization and configuration", () => {
+  it("initializes private storage idempotently without printing the token", async () => {
+    const root = await temporaryRoot();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const paths = resolveDaemonPaths(root);
+
+    expect(
+      await runCli(["init", "--home", root], runtime(stdout, stderr)),
+    ).toBe(0);
+    const token = await readControlToken(paths.tokenPath);
+    expect(
+      await runCli(["init", "--home", root], runtime(stdout, stderr)),
+    ).toBe(0);
+
+    expect(stdout.value).not.toContain(token);
+    expect(stderr.value).toBe("");
+    expect((await stat(paths.homeDirectory)).mode & 0o777).toBe(0o700);
+    expect((await stat(paths.tokenPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(paths.databasePath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("uses BLACKBOX_UPSTREAM_URL but never reuses OPENAI_BASE_URL", () => {
+    const parsed = parseCliArguments(["start", "--proxy-port", "0"]);
+    const ignored = resolveStartConfiguration(parsed.flags, {
+      OPENAI_BASE_URL: "http://127.0.0.1:9",
+    });
+    const selected = resolveStartConfiguration(parsed.flags, {
+      BLACKBOX_UPSTREAM_URL: "http://127.0.0.1:8080",
+      OPENAI_BASE_URL: "http://127.0.0.1:9",
+    });
+
+    expect(ignored.proxy.upstream.origin).toBe("https://api.openai.com");
+    expect(selected.proxy.upstream.origin).toBe("http://127.0.0.1:8080");
+  });
+
+  it("returns a usage error for unknown flags", async () => {
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+
+    expect(await runCli(["start", "--mystery"], runtime(stdout, stderr))).toBe(
+      2,
+    );
+    expect(stderr.value).toContain("Unknown flag --mystery");
+    expect(stderr.value).toContain("blackbox --help");
+  });
+});
+
+describe("CLI daemon lifecycle", () => {
+  it("starts idempotently, reports status, and stops through authenticated control", async () => {
+    const root = await temporaryRoot();
+    const upstreamOrigin = await upstream();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    let launches = 0;
+    const launch = async (configuration: ResolvedStartConfiguration) => {
+      launches += 1;
+      const daemon = new BlackBoxDaemon({
+        homeDirectory: configuration.paths.homeDirectory,
+        proxy: {
+          ...configuration.proxy,
+          upstream: configuration.proxy.upstream,
+        },
+        control: {
+          listenHost: configuration.controlHost,
+          listenPort: configuration.controlPort,
+        },
+        shutdownGraceMilliseconds: 100,
+      });
+      daemons.push(daemon);
+      await daemon.start();
+      return process.pid;
+    };
+    const cliRuntime = runtime(stdout, stderr, launch);
+    const startArguments = [
+      "start",
+      "--home",
+      root,
+      "--upstream",
+      upstreamOrigin,
+      "--proxy-port",
+      "0",
+      "--control-port",
+      "0",
+    ];
+
+    expect(await runCli(startArguments, cliRuntime)).toBe(0);
+    expect(await runCli(startArguments, cliRuntime)).toBe(0);
+    expect(launches).toBe(1);
+    expect(stdout.value).toContain("OPENAI_BASE_URL=http://127.0.0.1:");
+    const token = await readControlToken(resolveDaemonPaths(root).tokenPath);
+    expect(stdout.value).not.toContain(token);
+
+    stdout.clear();
+    expect(await runCli(["status", "--home", root, "--json"], cliRuntime)).toBe(
+      0,
+    );
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      state: "ready",
+      proxy: { status: "healthy" },
+    });
+    expect(stdout.value).not.toContain(token);
+
+    stdout.clear();
+    expect(await runCli(["stop", "--home", root], cliRuntime)).toBe(0);
+    expect(stdout.value).toContain("daemon stopped");
+    stdout.clear();
+    expect(await runCli(["status", "--home", root, "--json"], cliRuntime)).toBe(
+      1,
+    );
+    expect(JSON.parse(stdout.value)).toEqual({ state: "stopped" });
+    expect(stderr.value).toBe("");
+  });
+
+  it("recovers a corrupt lock during an idempotent stop", async () => {
+    const root = await temporaryRoot();
+    const paths = resolveDaemonPaths(root);
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    await writeFile(paths.lockPath, "{corrupt", { mode: 0o600 });
+
+    expect(
+      await runCli(["stop", "--home", root], runtime(stdout, stderr)),
+    ).toBe(0);
+    expect(stdout.value).toContain("removed corrupt lock");
+    await expect(readFile(paths.lockPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("will not send a token to a non-loopback lock endpoint", async () => {
+    const root = await temporaryRoot();
+    const paths: DaemonPaths = resolveDaemonPaths(root);
+
+    await expect(
+      requestDaemonStatus(
+        {
+          schemaVersion: 1,
+          instanceId: "daemon-hostile-lock",
+          pid: process.pid,
+          startedAt: "2026-07-16T12:00:00.000Z",
+          updatedAt: "2026-07-16T12:00:00.000Z",
+          state: "ready",
+          proxyOrigin: "http://127.0.0.1:4141",
+          controlOrigin: "https://attacker.example",
+        },
+        paths,
+      ),
+    ).rejects.toBeInstanceOf(UnsafeControlOriginError);
+  });
+});
+
+describe("CLI doctor", () => {
+  it("reports port conflicts, reachability, storage, limits, and WebSocket support", async () => {
+    const root = await temporaryRoot();
+    const upstreamOrigin = await upstream();
+    const occupiedOrigin = await listen(createServer());
+    const occupiedPort = new URL(occupiedOrigin).port;
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const cliRuntime = runtime(stdout, stderr);
+
+    expect(await runCli(["init", "--home", root], cliRuntime)).toBe(0);
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "doctor",
+          "--home",
+          root,
+          "--upstream",
+          upstreamOrigin,
+          "--proxy-port",
+          occupiedPort,
+          "--control-port",
+          "0",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(1);
+    const conflicted = JSON.parse(stdout.value) as {
+      checks: { id: string; status: string }[];
+    };
+    expect(conflicted.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "storage", status: "pass" }),
+        expect.objectContaining({ id: "upstream", status: "pass" }),
+        expect.objectContaining({ id: "proxy-port", status: "fail" }),
+        expect.objectContaining({ id: "capture-limits", status: "pass" }),
+        expect.objectContaining({
+          id: "websocket-transport",
+          status: "warn",
+        }),
+      ]),
+    );
+
+    const occupied = servers.pop();
+    await new Promise<void>((resolve) => occupied?.close(() => resolve()));
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "doctor",
+          "--home",
+          root,
+          "--upstream",
+          upstreamOrigin,
+          "--proxy-port",
+          occupiedPort,
+          "--control-port",
+          "0",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(
+      (JSON.parse(stdout.value) as { checks: { id: string; status: string }[] })
+        .checks,
+    ).toContainEqual(
+      expect.objectContaining({ id: "websocket-transport", status: "warn" }),
+    );
+
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "doctor",
+          "--home",
+          root,
+          "--upstream",
+          upstreamOrigin,
+          "--proxy-port",
+          occupiedPort,
+          "--control-port",
+          "0",
+          "--websocket",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(1);
+    const websocket = JSON.parse(stdout.value) as {
+      checks: { id: string; status: string }[];
+    };
+    expect(websocket.checks).toContainEqual(
+      expect.objectContaining({ id: "websocket-transport", status: "fail" }),
+    );
+    expect(stderr.value).toBe("");
+  });
+});

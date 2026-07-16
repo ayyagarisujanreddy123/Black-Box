@@ -5,6 +5,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@blackbox/daemon": fileURLToPath(
+        new URL("./apps/daemon/src/index.ts", import.meta.url),
+      ),
       "@blackbox/protocol": fileURLToPath(
         new URL("./packages/protocol/src/index.ts", import.meta.url),
       ),

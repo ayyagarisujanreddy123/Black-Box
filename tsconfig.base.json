@@ -17,6 +17,7 @@
     "noUncheckedIndexedAccess": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
+      "@blackbox/daemon": ["./apps/daemon/src/index.ts"],
       "@blackbox/protocol": ["./packages/protocol/src/index.ts"],
       "@blackbox/storage": ["./packages/storage/src/index.ts"]
     },

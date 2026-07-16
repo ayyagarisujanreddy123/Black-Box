@@ -64,6 +64,8 @@ const VALUE_FLAGS = new Set([
   "cwd",
   "max-output-frame-bytes",
   "max-untracked-file-bytes",
+  "watcher-debounce-ms",
+  "cleanup-timeout-ms",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -129,6 +131,8 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
     "cwd",
     "max-output-frame-bytes",
     "max-untracked-file-bytes",
+    "watcher-debounce-ms",
+    "cleanup-timeout-ms",
   ]),
 };
 

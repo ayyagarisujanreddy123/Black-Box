@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, type Stats } from "node:fs";
 import { lstat, open, readdir, readlink, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   WorkspaceFileChangeSummarySchema,
@@ -14,6 +14,12 @@ import {
   type WorkspaceManifestEntry,
   type WorkspaceSnapshotSummary,
 } from "@blackbox/protocol";
+
+import {
+  DebouncedWorkspaceWatcher,
+  type ApproximateWorkspaceChange,
+  type WorkspaceWatchPathState,
+} from "./workspace-watcher.js";
 
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_GIT_ERROR_BYTES = 64 * 1024;
@@ -49,6 +55,7 @@ export interface ObservedWorkspaceChange {
 export interface CompletedWorkspaceObservation {
   readonly snapshot: CapturedWorkspaceSnapshot;
   readonly changes: readonly ObservedWorkspaceChange[];
+  readonly watcherErrors: readonly Error[];
 }
 
 interface WorkspaceDescriptor {
@@ -83,6 +90,7 @@ interface CommandResult {
   readonly exitCode: number | null;
   readonly outputExceeded: boolean;
   readonly timedOut: boolean;
+  readonly aborted: boolean;
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -171,7 +179,9 @@ async function runCommand(
   arguments_: readonly string[],
   cwd: string,
   maximumOutputBytes: number,
+  signal?: AbortSignal,
 ): Promise<CommandResult> {
+  signal?.throwIfAborted();
   return await new Promise<CommandResult>((resolveCommand, rejectCommand) => {
     const child = spawn(executable, arguments_, {
       cwd,
@@ -184,7 +194,17 @@ async function runCommand(
     let stderrLength = 0;
     let outputExceeded = false;
     let timedOut = false;
+    let aborted = false;
     let settled = false;
+
+    const abort = () => {
+      aborted = true;
+      child.kill("SIGKILL");
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted === true) {
+      abort();
+    }
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -220,6 +240,7 @@ async function runCommand(
       }
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       rejectCommand(error);
     });
     child.once("close", (exitCode) => {
@@ -228,12 +249,14 @@ async function runCommand(
       }
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       resolveCommand({
         stdout: Buffer.concat(stdout),
         stderr: Buffer.concat(stderr),
         exitCode,
         outputExceeded,
         timedOut,
+        aborted,
       });
     });
   });
@@ -243,13 +266,19 @@ async function git(
   root: string,
   arguments_: readonly string[],
   maximumOutputBytes = MAX_GIT_OUTPUT_BYTES,
+  signal?: AbortSignal,
 ): Promise<Buffer> {
   const result = await runCommand(
     "git",
     ["-C", root, ...arguments_],
     root,
     maximumOutputBytes,
+    signal,
   );
+  if (result.aborted) {
+    signal?.throwIfAborted();
+    throw new Error("Git command was aborted.");
+  }
   if (result.timedOut) {
     throw new Error(`Git command timed out: git ${arguments_[0] ?? ""}`);
   }
@@ -267,6 +296,35 @@ async function git(
     );
   }
   return result.stdout;
+}
+
+async function gitPathIgnored(
+  root: string,
+  path: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const result = await runCommand(
+    "git",
+    ["-C", root, "check-ignore", "-q", "--", path],
+    root,
+    1024,
+    signal,
+  );
+  if (result.aborted) {
+    signal.throwIfAborted();
+  }
+  if (result.timedOut || result.outputExceeded) {
+    throw new Error(`Git ignore check did not complete for ${path}.`);
+  }
+  if (result.exitCode === 0) {
+    return true;
+  }
+  if (result.exitCode === 1) {
+    return false;
+  }
+  throw new Error(
+    `Git ignore check failed (${String(result.exitCode)}) for ${path}.`,
+  );
 }
 
 async function detectWorkspace(cwd: string): Promise<WorkspaceDescriptor> {
@@ -327,12 +385,18 @@ function dirtyPaths(status: Buffer): ReadonlySet<string> {
   return paths;
 }
 
-async function readFileAtSize(path: string, size: number): Promise<Buffer> {
+async function readFileAtSize(
+  path: string,
+  size: number,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  signal?.throwIfAborted();
   const handle = await open(path, "r");
   try {
     const bytes = Buffer.alloc(size);
     let offset = 0;
     while (offset < bytes.length) {
+      signal?.throwIfAborted();
       const result = await handle.read(
         bytes,
         offset,
@@ -350,9 +414,9 @@ async function readFileAtSize(path: string, size: number): Promise<Buffer> {
   }
 }
 
-async function hashFile(path: string): Promise<string> {
+async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   const digest = createHash("sha256");
-  for await (const chunk of createReadStream(path)) {
+  for await (const chunk of createReadStream(path, { signal })) {
     digest.update(chunk as Buffer);
   }
   return digest.digest("hex");
@@ -369,6 +433,7 @@ class SnapshotCollector {
     private readonly configuration: ProcessRunConfiguration,
     private readonly dataDirectory: string | undefined,
     private readonly maxCapturedContentBytes: number,
+    private readonly signal?: AbortSignal,
   ) {
     this.excludedSegments = new Set(configuration.excludedPathSegments);
   }
@@ -379,6 +444,10 @@ class SnapshotCollector {
     } else {
       this.reasons.add("additional-incomplete-reasons-omitted");
     }
+  }
+
+  throwIfAborted(): void {
+    this.signal?.throwIfAborted();
   }
 
   excluded(path: string): boolean {
@@ -395,6 +464,7 @@ class SnapshotCollector {
   }
 
   async capture(path: string, tracked: boolean): Promise<void> {
+    this.throwIfAborted();
     if (this.entries.size >= MAX_MANIFEST_ENTRIES) {
       this.addReason("manifest-entry-limit-reached");
       return;
@@ -419,6 +489,7 @@ class SnapshotCollector {
         this.addReason(`unsupported-file-type:${normalized}`);
       }
     } catch (error: unknown) {
+      this.throwIfAborted();
       if (errorCode(error) !== "ENOENT") {
         this.addReason(`unreadable:${normalized}:${errorCode(error)}`);
       }
@@ -452,6 +523,7 @@ class SnapshotCollector {
   ): Promise<void> {
     let stats = initialStats;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      this.throwIfAborted();
       const target = await readlink(absolutePath, { encoding: "buffer" });
       const finalStats = await lstat(absolutePath);
       if (sameFilesystemState(stats, finalStats)) {
@@ -491,15 +563,18 @@ class SnapshotCollector {
   ): Promise<void> {
     let stats = initialStats;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      this.throwIfAborted();
       const sensitivity: ContentSensitivity = secretPath(path)
         ? "secret"
         : "normal";
       const capture = this.canCaptureContent(stats.size, sensitivity);
       const content = capture
-        ? await readFileAtSize(absolutePath, stats.size)
+        ? await readFileAtSize(absolutePath, stats.size, this.signal)
         : undefined;
       const digest =
-        content === undefined ? await hashFile(absolutePath) : sha256(content);
+        content === undefined
+          ? await hashFile(absolutePath, this.signal)
+          : sha256(content);
       const finalStats = await lstat(absolutePath);
       if (
         sameFilesystemState(stats, finalStats) &&
@@ -536,14 +611,17 @@ async function directoryPaths(
 ): Promise<void> {
   let entries;
   try {
+    collector.throwIfAborted();
     entries = await readdir(directory, { withFileTypes: true });
   } catch (error: unknown) {
+    collector.throwIfAborted();
     const path = normalizeRelativePath(relative(root, directory)) ?? ".";
     collector.addReason(`unreadable-directory:${path}:${errorCode(error)}`);
     return;
   }
   entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of entries) {
+    collector.throwIfAborted();
     const absolutePath = resolve(directory, entry.name);
     const path = normalizeRelativePath(relative(root, absolutePath));
     if (path === undefined || collector.excluded(path)) {
@@ -561,7 +639,9 @@ async function captureSnapshot(
   descriptor: WorkspaceDescriptor,
   options: WorkspaceObserverOptions,
   phase: "baseline" | "final",
+  signal?: AbortSignal,
 ): Promise<InternalSnapshot> {
+  signal?.throwIfAborted();
   const capturedAt = (options.now ?? (() => new Date()))().toISOString();
   const collector = new SnapshotCollector(
     descriptor,
@@ -570,6 +650,7 @@ async function captureSnapshot(
       ? undefined
       : resolve(options.dataDirectory),
     options.maxCapturedContentBytes ?? DEFAULT_MAX_CAPTURED_CONTENT_BYTES,
+    signal,
   );
   let gitHead: string | null | undefined;
   let statusSha256: string | undefined;
@@ -577,39 +658,51 @@ async function captureSnapshot(
 
   if (descriptor.kind === "git") {
     try {
-      const head = await git(descriptor.root, [
-        "rev-parse",
-        "--verify",
-        "HEAD",
-      ]);
+      const head = await git(
+        descriptor.root,
+        ["rev-parse", "--verify", "HEAD"],
+        MAX_GIT_OUTPUT_BYTES,
+        signal,
+      );
       gitHead = head.toString("utf8").trim() || null;
     } catch {
+      signal?.throwIfAborted();
       gitHead = null;
     }
     try {
-      const status = await git(descriptor.root, [
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-        "--ignored=no",
-      ]);
+      const status = await git(
+        descriptor.root,
+        [
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          "--ignored=no",
+        ],
+        MAX_GIT_OUTPUT_BYTES,
+        signal,
+      );
       statusSha256 = sha256(status);
       gitDirtyPaths = dirtyPaths(status);
     } catch (error: unknown) {
+      signal?.throwIfAborted();
       collector.addReason(`git-status-failed:${errorCode(error)}`);
     }
 
     try {
       const [allOutput, trackedOutput] = await Promise.all([
-        git(descriptor.root, [
-          "ls-files",
-          "-z",
-          "--cached",
-          "--others",
-          "--exclude-standard",
-        ]),
-        git(descriptor.root, ["ls-files", "-z", "--cached"]),
+        git(
+          descriptor.root,
+          ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+          MAX_GIT_OUTPUT_BYTES,
+          signal,
+        ),
+        git(
+          descriptor.root,
+          ["ls-files", "-z", "--cached"],
+          MAX_GIT_OUTPUT_BYTES,
+          signal,
+        ),
       ]);
       const tracked = new Set(
         nullSeparatedPaths(trackedOutput)
@@ -624,15 +717,18 @@ async function captureSnapshot(
         ),
       ].sort();
       for (const path of paths) {
+        signal?.throwIfAborted();
         await collector.capture(path, tracked.has(path));
       }
     } catch (error: unknown) {
+      signal?.throwIfAborted();
       collector.addReason(`git-manifest-failed:${errorCode(error)}`);
     }
   } else {
     await directoryPaths(collector, descriptor.root);
   }
 
+  signal?.throwIfAborted();
   const entries = [...collector.entries.values()]
     .map((entry) => entry.manifest)
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -780,6 +876,7 @@ async function gitPatch(
   head: string,
   candidate: ChangeCandidate,
   maximumBytes: number,
+  signal?: AbortSignal,
 ): Promise<Buffer | undefined> {
   const paths = [candidate.previousPath, candidate.path].filter(
     (path, index, values): path is string =>
@@ -800,9 +897,11 @@ async function gitPatch(
         ...paths.map((path) => `:(literal)${path}`),
       ],
       maximumBytes,
+      signal,
     );
     return patch.length === 0 ? undefined : patch;
   } catch {
+    signal?.throwIfAborted();
     return undefined;
   }
 }
@@ -848,6 +947,8 @@ function baseSummary(
 export class WorkspaceObserver {
   readonly baseline: CapturedWorkspaceSnapshot;
   private completed = false;
+  private watcher: DebouncedWorkspaceWatcher | undefined;
+  private watchingStarted = false;
 
   private constructor(
     private readonly descriptor: WorkspaceDescriptor,
@@ -885,12 +986,59 @@ export class WorkspaceObserver {
     return new WorkspaceObserver(descriptor, normalizedOptions, baseline);
   }
 
-  async complete(): Promise<CompletedWorkspaceObservation> {
+  startWatching(
+    listener: (change: ApproximateWorkspaceChange) => void | Promise<void>,
+  ): void {
+    if (this.completed || this.watchingStarted) {
+      throw new Error(
+        "Workspace watching must start once before observation completes.",
+      );
+    }
+    this.watchingStarted = true;
+    const exclusionCollector = new SnapshotCollector(
+      this.descriptor,
+      this.options.configuration,
+      this.options.dataDirectory,
+      0,
+    );
+    const baseline = new Map<string, WorkspaceWatchPathState>(
+      [...this.baselineSnapshot.entries].map(([path, entry]) => [
+        path,
+        { manifest: entry.manifest, sensitivity: entry.sensitivity },
+      ]),
+    );
+    this.watcher = new DebouncedWorkspaceWatcher({
+      root: this.descriptor.root,
+      debounceMilliseconds:
+        this.options.configuration.watcherDebounceMilliseconds,
+      baseline,
+      now: this.options.now ?? (() => new Date()),
+      excluded: (path) => exclusionCollector.excluded(path),
+      inspect: async (path, signal) =>
+        await this.inspectWatchedPath(path, signal),
+      listener,
+    });
+  }
+
+  async stopWatching(signal?: AbortSignal): Promise<readonly Error[]> {
+    const watcher = this.watcher;
+    this.watcher = undefined;
+    return watcher === undefined ? [] : await watcher.stop(signal);
+  }
+
+  async complete(signal?: AbortSignal): Promise<CompletedWorkspaceObservation> {
     if (this.completed) {
       throw new Error("Workspace observation may only be completed once.");
     }
     this.completed = true;
-    const final = await captureSnapshot(this.descriptor, this.options, "final");
+    const watcherErrors = await this.stopWatching(signal);
+    signal?.throwIfAborted();
+    const final = await captureSnapshot(
+      this.descriptor,
+      this.options,
+      "final",
+      signal,
+    );
     const allCandidates = changesBetween(this.baselineSnapshot, final);
     const candidates = allCandidates.slice(0, MAX_FILE_CHANGE_EVENTS);
     const observedAt = final.evidence.summary.capturedAt;
@@ -912,6 +1060,7 @@ export class WorkspaceObserver {
     }
 
     for (const candidate of candidates) {
+      signal?.throwIfAborted();
       let payload: Buffer | undefined;
       let payloadKind: "git-binary-patch" | "file-delta" | undefined;
       let mediaType: string | undefined;
@@ -953,6 +1102,7 @@ export class WorkspaceObserver {
             maximumPayloadBytes,
             maximumTotalPayloadBytes - payloadBytes,
           ),
+          signal,
         );
         if (payload !== undefined) {
           payloadKind = "git-binary-patch";
@@ -993,12 +1143,67 @@ export class WorkspaceObserver {
       changedFileCount: allCandidates.length,
       incompleteReasons: [...incompleteReasons].sort(),
     });
+    signal?.throwIfAborted();
     return {
       snapshot: {
         summary: snapshotSummary,
         manifest: final.evidence.manifest,
       },
       changes,
+      watcherErrors,
     };
+  }
+
+  private async inspectWatchedPath(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceWatchPathState | undefined> {
+    signal.throwIfAborted();
+    const absolutePath = resolve(this.descriptor.root, path);
+    if (!isWithin(this.descriptor.root, absolutePath)) {
+      return undefined;
+    }
+    const baselineEntry = this.baselineSnapshot.entries.get(path);
+    if (
+      this.descriptor.kind === "git" &&
+      baselineEntry === undefined &&
+      (await gitPathIgnored(this.descriptor.root, path, signal))
+    ) {
+      return undefined;
+    }
+    let parent = dirname(absolutePath);
+    while (isWithin(this.descriptor.root, parent)) {
+      try {
+        const canonicalParent = await realpath(parent);
+        if (
+          canonicalParent !== parent ||
+          !isWithin(this.descriptor.root, canonicalParent)
+        ) {
+          return undefined;
+        }
+        break;
+      } catch (error: unknown) {
+        if (errorCode(error) !== "ENOENT") {
+          throw error;
+        }
+        if (parent === this.descriptor.root) {
+          return undefined;
+        }
+        parent = dirname(parent);
+      }
+    }
+    signal.throwIfAborted();
+    const collector = new SnapshotCollector(
+      this.descriptor,
+      this.options.configuration,
+      this.options.dataDirectory,
+      0,
+      signal,
+    );
+    await collector.capture(path, baselineEntry?.manifest.tracked ?? false);
+    const entry = collector.entries.get(path);
+    return entry === undefined
+      ? undefined
+      : { manifest: entry.manifest, sensitivity: entry.sensitivity };
   }
 }

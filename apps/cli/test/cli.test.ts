@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { EventEmitter } from "node:events";
 import {
   mkdtemp,
   readFile,
@@ -29,6 +30,7 @@ import {
   type CliOutput,
   type CliRuntime,
   type ResolvedStartConfiguration,
+  type SignalEventSource,
 } from "../src/index.js";
 
 class CapturedOutput implements CliOutput {
@@ -382,7 +384,18 @@ describe("CLI daemon lifecycle", () => {
           "file.create",
         ]),
       );
-      const fileEvent = events.find((event) => event.type === "file.create");
+      expect(
+        events.some(
+          (event) =>
+            event.type === "file.create" &&
+            event.summary.timingPrecision === "approximate-watcher",
+        ),
+      ).toBe(true);
+      const fileEvent = events.find(
+        (event) =>
+          event.type === "file.create" &&
+          event.summary.timingPrecision === "exact-final-diff",
+      );
       expect(fileEvent).toMatchObject({
         source: "filesystem",
         summary: {
@@ -403,6 +416,103 @@ describe("CLI daemon lifecycle", () => {
         .get(childOutput.session) as { id: string };
       expect(storage.rawExchanges.getRequired(rawRow.id).path).toBe(
         "/v1/responses",
+      );
+    } finally {
+      storage.close();
+    }
+  });
+
+  it("forwards Ctrl-C and preserves the child's final filesystem effect", async () => {
+    const root = await temporaryRoot();
+    const workspace = await temporaryRoot();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const signalSource = new EventEmitter();
+    const launch = async (configuration: ResolvedStartConfiguration) => {
+      const daemon = new BlackBoxDaemon({
+        homeDirectory: configuration.paths.homeDirectory,
+        proxy: configuration.proxy,
+        control: {
+          listenHost: configuration.controlHost,
+          listenPort: configuration.controlPort,
+        },
+        shutdownGraceMilliseconds: 100,
+      });
+      daemons.push(daemon);
+      await daemon.start();
+      return process.pid;
+    };
+    const script = `
+      const fs = require("node:fs");
+      process.on("SIGINT", () => {
+        fs.writeFileSync("signal-result.txt", "signal forwarded\\n");
+        process.exit(42);
+      });
+      process.stdout.write("ready\\n");
+      setInterval(() => undefined, 1000);
+    `;
+
+    const running = runCli(
+      [
+        "run",
+        "--home",
+        root,
+        "--proxy-port",
+        "0",
+        "--control-port",
+        "0",
+        "--cwd",
+        workspace,
+        "--watcher-debounce-ms",
+        "10",
+        "--cleanup-timeout-ms",
+        "2000",
+        "--",
+        process.execPath,
+        "-e",
+        script,
+      ],
+      {
+        ...runtime(stdout, stderr, launch),
+        signalSource: signalSource as SignalEventSource,
+      },
+    );
+    await eventually(() => stdout.value.includes("ready\n"));
+    signalSource.emit("SIGINT");
+
+    expect(await running).toBe(42);
+    expect(stderr.value).toBe("");
+    expect(signalSource.listenerCount("SIGINT")).toBe(0);
+    expect(signalSource.listenerCount("SIGTERM")).toBe(0);
+
+    const paths = resolveDaemonPaths(root);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      const session = storage.sessions.list(1)[0];
+      expect(session).toMatchObject({
+        status: "completed",
+        repoRoot: await realpath(workspace),
+      });
+      const events = storage.events.list(session?.id as string).events;
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "process.exited",
+            summary: expect.objectContaining({ exitCode: 42 }),
+          }),
+          expect.objectContaining({
+            type: "file.create",
+            summary: expect.objectContaining({
+              path: "signal-result.txt",
+              timingPrecision: "exact-final-diff",
+            }),
+          }),
+          expect.objectContaining({ type: "workspace.snapshot" }),
+        ]),
       );
     } finally {
       storage.close();

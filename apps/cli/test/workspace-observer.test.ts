@@ -5,11 +5,13 @@ import {
   rename,
   realpath,
   rm,
+  symlink,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -40,6 +42,7 @@ function configuration(maxUntrackedFileBytes = 32) {
       ...DEFAULT_PROCESS_RUN_CONFIGURATION.excludedPathSegments,
     ],
     maxUntrackedFileBytes,
+    watcherDebounceMilliseconds: 25,
   };
 }
 
@@ -76,6 +79,10 @@ describe("authoritative workspace snapshots", () => {
       dataDirectory: blackBoxDirectory,
       configuration: configuration(),
     });
+    const watched: { summary: { path: string } }[] = [];
+    observer.startWatching((change) => {
+      watched.push(change);
+    });
 
     await Promise.all([
       writeFile(join(root, "modify.txt"), "after modify\n"),
@@ -87,6 +94,7 @@ describe("authoritative workspace snapshots", () => {
       writeFile(join(blackBoxDirectory, "internal.tmp"), "final\n"),
     ]);
     await rename(join(root, "rename-old.txt"), join(root, "renamed.txt"));
+    await delay(150);
 
     const completed = await observer.complete();
     const changes = new Map(
@@ -116,6 +124,14 @@ describe("authoritative workspace snapshots", () => {
     expect(changes.has("dirty.txt")).toBe(false);
     expect(changes.has("ignored/ignored.txt")).toBe(false);
     expect(changes.has("blackbox-home/internal.tmp")).toBe(false);
+    expect(
+      watched.some((change) => change.summary.path === "ignored/ignored.txt"),
+    ).toBe(false);
+    expect(
+      watched.some(
+        (change) => change.summary.path === "blackbox-home/internal.tmp",
+      ),
+    ).toBe(false);
 
     expect(changes.get("renamed.txt")?.summary).toMatchObject({
       operation: "rename",
@@ -174,6 +190,12 @@ describe("authoritative workspace snapshots", () => {
       cwd: root,
       configuration: configuration(1024),
     });
+    const watched: {
+      summary: { path: string; operation: string; timingPrecision: string };
+    }[] = [];
+    observer.startWatching((change) => {
+      watched.push(change);
+    });
 
     await Promise.all([
       writeFile(join(root, "modify.txt"), "new\n"),
@@ -181,6 +203,7 @@ describe("authoritative workspace snapshots", () => {
       writeFile(join(root, "create.txt"), "create\n"),
     ]);
     await rename(join(root, "rename.txt"), join(root, "moved.txt"));
+    await delay(150);
     const completed = await observer.complete();
 
     expect(observer.baseline.summary.kind).toBe("directory");
@@ -201,5 +224,86 @@ describe("authoritative workspace snapshots", () => {
         (change) => change.summary.payloadKind === "file-delta",
       ),
     ).toBe(true);
+    expect(watched.map((change) => change.summary)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "create.txt",
+          operation: "create",
+          timingPrecision: "approximate-watcher",
+        }),
+        expect.objectContaining({ path: "delete.txt", operation: "delete" }),
+        expect.objectContaining({ path: "modify.txt", operation: "modify" }),
+        expect.objectContaining({
+          path: "moved.txt",
+          operation: "rename",
+        }),
+      ]),
+    );
+    expect(completed.watcherErrors).toEqual([]);
+  });
+
+  it("records a symlink itself without crossing its target boundary", async () => {
+    const root = await temporaryRoot("blackbox-symlink-observer-test-");
+    const outside = await temporaryRoot("blackbox-symlink-outside-test-");
+    const secondOutside = await temporaryRoot(
+      "blackbox-symlink-second-outside-test-",
+    );
+    await Promise.all([
+      writeFile(join(outside, "outside.txt"), "outside baseline\n"),
+      writeFile(join(secondOutside, "outside.txt"), "second outside\n"),
+    ]);
+    await symlink(outside, join(root, "external"), "dir");
+    const observer = await WorkspaceObserver.start({
+      cwd: root,
+      configuration: configuration(1024),
+    });
+    const watched: { summary: { path: string } }[] = [];
+    observer.startWatching((change) => {
+      watched.push(change);
+    });
+
+    await writeFile(
+      join(root, "external", "outside.txt"),
+      "outside changed through link\n",
+    );
+    await unlink(join(root, "external"));
+    await symlink(secondOutside, join(root, "external"), "dir");
+    await delay(150);
+    const completed = await observer.complete();
+
+    expect(observer.baseline.manifest.entries).toEqual([
+      expect.objectContaining({ path: "external", kind: "symlink" }),
+    ]);
+    expect(completed.snapshot.manifest.entries).toEqual([
+      expect.objectContaining({ path: "external", kind: "symlink" }),
+    ]);
+    expect(completed.changes).toEqual([
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          path: "external",
+          operation: "modify",
+          timingPrecision: "exact-final-diff",
+        }),
+      }),
+    ]);
+    expect(
+      watched.some((change) => change.summary.path === "external/outside.txt"),
+    ).toBe(false);
+  });
+
+  it("closes its watcher when final capture is canceled", async () => {
+    const root = await temporaryRoot("blackbox-canceled-observer-test-");
+    const observer = await WorkspaceObserver.start({
+      cwd: root,
+      configuration: configuration(),
+    });
+    observer.startWatching(() => undefined);
+    const controller = new AbortController();
+    controller.abort(new Error("test cleanup cancellation"));
+
+    await expect(observer.complete(controller.signal)).rejects.toThrow(
+      "test cleanup cancellation",
+    );
+    await expect(observer.stopWatching()).resolves.toEqual([]);
   });
 });

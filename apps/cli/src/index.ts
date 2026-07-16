@@ -39,6 +39,11 @@ import {
   DEFAULT_PROCESS_RUN_CONFIGURATION,
   RunEventJournal,
 } from "./run/run-event-journal.js";
+import { withCleanupDeadline } from "./run/cleanup-deadline.js";
+import {
+  installSignalForwarding,
+  type SignalEventSource,
+} from "./run/signal-forwarder.js";
 import { WorkspaceObserver } from "./run/workspace-observer.js";
 
 const HELP = `Black Box — the flight recorder for AI coding agents
@@ -80,6 +85,8 @@ Run options:
   --cwd PATH                      Child working directory (default current directory)
   --max-output-frame-bytes N      Maximum stored stdout/stderr frame (default 262144)
   --max-untracked-file-bytes N    Maximum stored content per changed file (default 1048576)
+  --watcher-debounce-ms N         Approximate file timing debounce (default 100)
+  --cleanup-timeout-ms N          Final evidence cleanup bound (default 10000)
 `;
 
 export interface CliOutput {
@@ -92,6 +99,7 @@ export interface CliRuntime {
   readonly environment: NodeJS.ProcessEnv;
   readonly launchDaemon: DaemonLauncher;
   readonly now: () => Date;
+  readonly signalSource: SignalEventSource;
 }
 
 const DEFAULT_RUNTIME: CliRuntime = {
@@ -100,6 +108,7 @@ const DEFAULT_RUNTIME: CliRuntime = {
   environment: process.env,
   launchDaemon: launchDaemonProcess,
   now: () => new Date(),
+  signalSource: process,
 };
 
 function timeoutFromArguments(
@@ -365,10 +374,25 @@ async function commandRun(
         0,
         1024 * 1024 * 1024,
       ),
+      watcherDebounceMilliseconds: integerFlag(
+        parsed.flags,
+        "watcher-debounce-ms",
+        DEFAULT_PROCESS_RUN_CONFIGURATION.watcherDebounceMilliseconds,
+        1,
+        60_000,
+      ),
+      cleanupGraceMilliseconds: integerFlag(
+        parsed.flags,
+        "cleanup-timeout-ms",
+        DEFAULT_PROCESS_RUN_CONFIGURATION.cleanupGraceMilliseconds,
+        1,
+        120_000,
+      ),
     },
   });
   let recordingFailure: unknown;
   let workspaceObserver: WorkspaceObserver | undefined;
+  let removeSignalForwarding: () => void = () => undefined;
   const observe = (operation: Promise<void>) => {
     void operation.catch((error: unknown) => {
       recordingFailure ??= error;
@@ -383,6 +407,18 @@ async function commandRun(
       now: runtime.now,
     });
     await journal.recordWorkspaceSnapshot(workspaceObserver.baseline);
+    try {
+      workspaceObserver.startWatching(async (change) => {
+        await journal.recordFileChange(change);
+      });
+    } catch (error: unknown) {
+      recordingFailure ??= error;
+      await journal
+        .recordWorkspaceError("watcher", error, runtime.now().toISOString())
+        .catch((journalError: unknown) => {
+          recordingFailure ??= journalError;
+        });
+    }
   } catch (error: unknown) {
     recordingFailure ??= error;
     await journal
@@ -445,6 +481,10 @@ async function commandRun(
         resolveOutcome({ kind: "closed", exitCode, signal });
       });
     });
+    removeSignalForwarding = installSignalForwarding(
+      child,
+      runtime.signalSource,
+    );
 
     if (child.pid !== undefined) {
       observe(journal.recordStarted(child.pid, runtime.now().toISOString()));
@@ -492,11 +532,32 @@ async function commandRun(
 
     if (workspaceObserver !== undefined) {
       try {
-        const workspace = await workspaceObserver.complete();
-        for (const change of workspace.changes) {
-          await journal.recordFileChange(change);
-        }
-        await journal.recordWorkspaceSnapshot(workspace.snapshot);
+        await withCleanupDeadline(
+          journal.identity.configuration.cleanupGraceMilliseconds,
+          async (signal) => {
+            const workspace = await workspaceObserver.complete(signal);
+            if (workspace.watcherErrors.length > 0) {
+              const watcherError = new Error(
+                `Filesystem watcher reported ${workspace.watcherErrors.length} error(s): ${
+                  workspace.watcherErrors[0]?.message ?? "unknown watcher error"
+                }`,
+              );
+              recordingFailure ??= watcherError;
+              await journal.recordWorkspaceError(
+                "watcher",
+                watcherError,
+                runtime.now().toISOString(),
+              );
+            }
+            for (const change of workspace.changes) {
+              signal.throwIfAborted();
+              await journal.recordFileChange(change);
+            }
+            signal.throwIfAborted();
+            await journal.recordWorkspaceSnapshot(workspace.snapshot);
+            signal.throwIfAborted();
+          },
+        );
       } catch (error: unknown) {
         recordingFailure ??= error;
         await journal
@@ -523,6 +584,16 @@ async function commandRun(
     }
     return childExitStatus(result.exitCode, result.signal);
   } finally {
+    if (workspaceObserver !== undefined) {
+      await withCleanupDeadline(
+        journal.identity.configuration.cleanupGraceMilliseconds,
+        async (signal) => {
+          await workspaceObserver.stopWatching(signal);
+          signal.throwIfAborted();
+        },
+      ).catch(() => undefined);
+    }
+    removeSignalForwarding();
     storage.close();
   }
 }
@@ -814,4 +885,7 @@ export * from "./control-client.js";
 export * from "./daemon-launcher.js";
 export * from "./doctor.js";
 export * from "./run/run-event-journal.js";
+export * from "./run/cleanup-deadline.js";
+export * from "./run/signal-forwarder.js";
 export * from "./run/workspace-observer.js";
+export * from "./run/workspace-watcher.js";

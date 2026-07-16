@@ -29,6 +29,7 @@ export const DEFAULT_PROCESS_RUN_CONFIGURATION = {
   maxOutputFrameBytes: 256 * 1024,
   maxUntrackedFileBytes: 1024 * 1024,
   watcherDebounceMilliseconds: 100,
+  cleanupGraceMilliseconds: 10_000,
   excludedPathSegments: [
     ".git",
     "node_modules",
@@ -321,7 +322,7 @@ export class RunEventJournal {
   }
 
   recordWorkspaceError(
-    phase: "baseline" | "final",
+    phase: "baseline" | "watcher" | "final",
     error: unknown,
     observedAt: string,
   ): Promise<void> {

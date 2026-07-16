@@ -61,6 +61,7 @@ export const ProcessRunConfigurationSchema = z
       .nonnegative()
       .max(1024 * 1024 * 1024),
     watcherDebounceMilliseconds: z.number().int().positive().max(60_000),
+    cleanupGraceMilliseconds: z.number().int().positive().max(120_000),
     excludedPathSegments: z.array(z.string().trim().min(1)),
   })
   .strict();

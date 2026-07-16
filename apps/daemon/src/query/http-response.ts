@@ -42,3 +42,14 @@ export function sendInertPayload(
   });
   response.end(Buffer.from(bytes));
 }
+
+export function beginEventStream(response: ServerResponse): void {
+  response.writeHead(200, {
+    ...INERT_RESPONSE_HEADERS,
+    "cache-control": "no-cache, no-store, must-revalidate, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no",
+  });
+  response.flushHeaders();
+}

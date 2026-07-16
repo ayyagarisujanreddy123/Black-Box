@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   EventListQuerySchema,
+  LiveEventReadySchema,
+  LiveEventResumeQuerySchema,
   QueryErrorSchema,
   SessionListQuerySchema,
   SessionPageSchema,
@@ -25,6 +27,22 @@ describe("local evidence query contracts", () => {
         occurredAfter: "2026-07-16T12:00:01.000Z",
         occurredBefore: TIME,
       }).success,
+    ).toBe(false);
+  });
+
+  it("defines a non-negative live recovery cursor", () => {
+    expect(LiveEventResumeQuerySchema.parse({})).toEqual({
+      afterSequence: 0,
+    });
+    expect(
+      LiveEventReadySchema.parse({
+        schemaVersion: 1,
+        sessionId: "session-query",
+        afterSequence: 12,
+      }),
+    ).toMatchObject({ afterSequence: 12 });
+    expect(
+      LiveEventResumeQuerySchema.safeParse({ afterSequence: -1 }).success,
     ).toBe(false);
   });
 

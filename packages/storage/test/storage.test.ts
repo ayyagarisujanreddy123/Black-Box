@@ -493,6 +493,14 @@ describe("repositories, recovery, and stable ordering", () => {
     expect(firstPage.events.map((item) => item.sequence)).toEqual([1, 2]);
     expect(secondPage.events.map((item) => item.sequence)).toEqual([3, 4]);
     expect(secondPage.nextCursor).toBeUndefined();
+    expect(
+      second.events
+        .listAfterSequence("session-storage", 2, 2)
+        .map((item) => item.sequence),
+    ).toEqual([3, 4]);
+    expect(() =>
+      storage.events.listAfterSequence("session-storage", -1),
+    ).toThrow("non-negative integer");
     expect(storage.sessions.getRequired("session-storage").counts.events).toBe(
       4,
     );

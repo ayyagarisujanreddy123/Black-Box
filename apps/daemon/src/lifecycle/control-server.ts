@@ -13,6 +13,7 @@ import { isLoopbackHost } from "../proxy/config.js";
 import type { EvidenceQueryService } from "../query/evidence-query-service.js";
 import { EvidenceQueryRouter } from "../query/evidence-query-router.js";
 import { sendJson } from "../query/http-response.js";
+import type { LiveEventStreamConfiguration } from "../query/live-event-stream.js";
 import { ControlTokenSchema } from "./control-token.js";
 import type { DaemonStatus } from "./status.js";
 
@@ -27,6 +28,7 @@ export interface ControlServerOptions {
   readonly allowedOrigins?: readonly string[];
   readonly query?: EvidenceQueryService;
   readonly maximumQueryPayloadBytes?: number;
+  readonly liveQuery?: LiveEventStreamConfiguration;
 }
 
 export interface ControlAddress {
@@ -98,6 +100,9 @@ export class ControlServer {
             ...(options.maximumQueryPayloadBytes === undefined
               ? {}
               : { maximumPayloadBytes: options.maximumQueryPayloadBytes }),
+            ...(options.liveQuery === undefined
+              ? {}
+              : { liveStream: options.liveQuery }),
           });
     this.server = createServer((request, response) => {
       void this.handle(request, response).catch(() => {

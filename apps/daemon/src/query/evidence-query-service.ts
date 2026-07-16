@@ -7,6 +7,7 @@ import {
   FileChangeListQuerySchema,
   FileChangePageSchema,
   IdentifierSchema,
+  LiveEventCursorSchema,
   SessionDetailSchema,
   SessionListQuerySchema,
   SessionPageSchema,
@@ -19,6 +20,7 @@ import {
   type EventSearchResult,
   type FileChangeListQueryInput,
   type FileChangePage,
+  type BlackBoxEvent,
   type SessionDetail,
   type SessionListQueryInput,
   type SessionPage,
@@ -151,6 +153,16 @@ export class EvidenceQueryService {
       }),
       ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
     });
+  }
+
+  listEventsAfterSequence(
+    sessionId: string,
+    afterSequence: number,
+    limit: number,
+  ): BlackBoxEvent[] {
+    const id = IdentifierSchema.parse(sessionId);
+    const cursor = LiveEventCursorSchema.parse(afterSequence);
+    return this.storage.events.listAfterSequence(id, cursor, limit);
   }
 
   searchEvents(

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   EvidenceSourceSchema,
+  LiveEventResumeQuerySchema,
   QueryErrorSchema,
   type EvidenceSource,
 } from "@blackbox/protocol";
@@ -14,6 +15,11 @@ import {
   type EvidenceQueryService,
 } from "./evidence-query-service.js";
 import { sendInertPayload, sendJson } from "./http-response.js";
+import {
+  LiveEventStreamer,
+  LiveEventStreamCapacityError,
+  type LiveEventStreamConfiguration,
+} from "./live-event-stream.js";
 
 const MaximumPayloadBytesSchema = z
   .number()
@@ -25,6 +31,7 @@ export interface EvidenceQueryRouterOptions {
   readonly query: EvidenceQueryService;
   readonly status: () => DaemonStatus | Promise<DaemonStatus>;
   readonly maximumPayloadBytes?: number;
+  readonly liveStream?: LiveEventStreamConfiguration;
 }
 
 class InvalidQueryRequestError extends Error {}
@@ -96,6 +103,17 @@ function optionalEvidenceSource(url: URL): EvidenceSource | undefined {
   return value === undefined ? undefined : EvidenceSourceSchema.parse(value);
 }
 
+function lastEventSequence(request: IncomingMessage): number | undefined {
+  const header = request.headers["last-event-id"];
+  if (header === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(header) || !/^\d+$/u.test(header)) {
+    throw new InvalidQueryRequestError("Last-Event-ID must be an integer.");
+  }
+  return Number(header);
+}
+
 function requireGet(
   request: IncomingMessage,
   response: ServerResponse,
@@ -115,10 +133,15 @@ function requireGet(
 
 export class EvidenceQueryRouter {
   private readonly maximumPayloadBytes: number;
+  private readonly liveEvents: LiveEventStreamer;
 
   constructor(private readonly options: EvidenceQueryRouterOptions) {
     this.maximumPayloadBytes = MaximumPayloadBytesSchema.parse(
       options.maximumPayloadBytes ?? 64 * 1024 * 1024,
+    );
+    this.liveEvents = new LiveEventStreamer(
+      options.query,
+      options.liveStream ?? {},
     );
   }
 
@@ -237,6 +260,30 @@ export class EvidenceQueryRouter {
           );
           return true;
         }
+        if (childRoute === "live") {
+          assertAllowedParameters(url, new Set(["after"]));
+          const querySequence = optionalInteger(url, "after");
+          const headerSequence = lastEventSequence(request);
+          if (
+            querySequence !== undefined &&
+            headerSequence !== undefined &&
+            querySequence !== headerSequence
+          ) {
+            throw new InvalidQueryRequestError(
+              "The recovery cursors do not match.",
+            );
+          }
+          const recovery = LiveEventResumeQuerySchema.parse({
+            afterSequence: querySequence ?? headerSequence ?? 0,
+          });
+          await this.liveEvents.stream(
+            request,
+            response,
+            sessionId,
+            recovery.afterSequence,
+          );
+          return true;
+        }
         return false;
       }
       if (route === "events" && encodedSegments.length === 3) {
@@ -287,6 +334,19 @@ export class EvidenceQueryRouter {
             message: error.message,
           }),
         );
+        return true;
+      }
+      if (error instanceof LiveEventStreamCapacityError) {
+        sendJson(
+          response,
+          503,
+          QueryErrorSchema.parse({ error: "stream_capacity_exceeded" }),
+          { "retry-after": "1" },
+        );
+        return true;
+      }
+      if (response.headersSent) {
+        response.destroy();
         return true;
       }
       sendJson(

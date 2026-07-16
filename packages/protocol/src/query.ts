@@ -12,6 +12,11 @@ import { SessionSchema } from "./session.js";
 
 export const QueryCursorSchema = z.string().min(1).max(4096);
 export const QueryLimitSchema = z.number().int().min(1).max(1000);
+export const LiveEventCursorSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
 
 export const SessionListQuerySchema = z
   .object({
@@ -97,6 +102,20 @@ export const FileChangePageSchema = z
   })
   .strict();
 
+export const LiveEventResumeQuerySchema = z
+  .object({
+    afterSequence: LiveEventCursorSchema.default(0),
+  })
+  .strict();
+
+export const LiveEventReadySchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    sessionId: IdentifierSchema,
+    afterSequence: LiveEventCursorSchema,
+  })
+  .strict();
+
 export const EventSearchQuerySchema = z
   .object({
     query: z.string().trim().min(1).max(1024),
@@ -122,6 +141,7 @@ export const QueryErrorSchema = z
       "not_found",
       "method_not_allowed",
       "payload_unavailable",
+      "stream_capacity_exceeded",
       "internal_query_error",
     ]),
     message: z.string().min(1).max(4096).optional(),
@@ -140,6 +160,12 @@ export type FileChangeListQueryInput = z.input<
   typeof FileChangeListQuerySchema
 >;
 export type FileChangePage = z.infer<typeof FileChangePageSchema>;
+export type LiveEventCursor = z.infer<typeof LiveEventCursorSchema>;
+export type LiveEventReady = z.infer<typeof LiveEventReadySchema>;
+export type LiveEventResumeQuery = z.infer<typeof LiveEventResumeQuerySchema>;
+export type LiveEventResumeQueryInput = z.input<
+  typeof LiveEventResumeQuerySchema
+>;
 export type QueryError = z.infer<typeof QueryErrorSchema>;
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;
 export type SessionListQuery = z.infer<typeof SessionListQuerySchema>;

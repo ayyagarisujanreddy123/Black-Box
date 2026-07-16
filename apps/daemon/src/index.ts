@@ -8,6 +8,7 @@ export * from "./normalization/normalization-runner.js";
 export * from "./query/evidence-query-service.js";
 export * from "./query/evidence-query-router.js";
 export * from "./query/http-response.js";
+export * from "./query/live-event-stream.js";
 export * from "./proxy/capture.js";
 export * from "./proxy/config.js";
 export * from "./proxy/errors.js";

@@ -304,6 +304,31 @@ export class EventRepository {
     };
   }
 
+  listAfterSequence(
+    sessionId: string,
+    afterSequence: number,
+    limit = 100,
+  ): BlackBoxEvent[] {
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+      throw new RangeError(
+        "Event sequence cursor must be a non-negative integer.",
+      );
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
+      throw new RangeError("Live event batch size must be between 1 and 1000.");
+    }
+    const rows = this.database
+      .prepare(
+        `SELECT record_json
+         FROM events
+         WHERE session_id = ? AND sequence > ?
+         ORDER BY sequence ASC, id ASC
+         LIMIT ?`,
+      )
+      .all(sessionId, afterSequence, limit) as EventRow[];
+    return rows.map(parseEventRow);
+  }
+
   search(sessionId: string, query: string, limit = 50): BlackBoxEvent[] {
     const rows = this.database
       .prepare(

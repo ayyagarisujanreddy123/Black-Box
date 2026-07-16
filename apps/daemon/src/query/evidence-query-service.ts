@@ -118,6 +118,11 @@ export class EvidenceQueryService {
     if (event === undefined) {
       throw new EvidenceQueryNotFoundError("event", id);
     }
+    const origin = this.storage.events.getOrigin(id);
+    const rawExchange =
+      origin?.rawExchangeId === undefined
+        ? undefined
+        : this.storage.rawExchanges.get(origin.rawExchangeId);
     const parsedChange = event.type.startsWith("file.")
       ? WorkspaceFileChangeSummarySchema.safeParse(event.summary)
       : undefined;
@@ -127,6 +132,10 @@ export class EvidenceQueryService {
       ...(parsedChange?.success === true
         ? { fileChange: parsedChange.data }
         : {}),
+      ...(rawExchange === undefined ? {} : { rawExchange }),
+      ...(origin?.normalizationVersion === undefined
+        ? {}
+        : { normalizationVersion: origin.normalizationVersion }),
     });
   }
 

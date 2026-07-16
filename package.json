@@ -14,7 +14,7 @@
   "packageManager": "npm@10.9.3",
   "scripts": {
     "blackbox": "node apps/cli/dist/bin.js",
-    "build": "tsc -b --pretty false",
+    "build": "tsc -b --pretty false && npm run build:assets --workspace @blackbox/viewer",
     "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run test:e2e",
     "clean": "tsc -b --clean",
     "format": "prettier --check .",

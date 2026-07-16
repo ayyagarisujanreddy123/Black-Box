@@ -126,6 +126,52 @@ export const WorkspaceFileChangeSummarySchema = z
   })
   .strict();
 
+export const FileDeltaContentSchema = z
+  .object({
+    sha256: Sha256Schema,
+    byteLength: z.number().int().nonnegative(),
+    encoding: z.literal("base64"),
+    content: z.string(),
+  })
+  .strict();
+
+export const FileDeltaPayloadSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    path: z.string().min(1),
+    operation: z.enum(["create", "modify", "delete", "rename"]),
+    previousPath: z.string().min(1).optional(),
+    before: FileDeltaContentSchema.nullable(),
+    after: FileDeltaContentSchema.nullable(),
+  })
+  .strict()
+  .superRefine((delta, context) => {
+    if (delta.operation === "create" && delta.before !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "A created file cannot have before content.",
+        path: ["before"],
+      });
+    }
+    if (delta.operation === "delete" && delta.after !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "A deleted file cannot have after content.",
+        path: ["after"],
+      });
+    }
+    if (
+      new Set(["modify", "rename"]).has(delta.operation) &&
+      (delta.before === null || delta.after === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Modified and renamed files require both content states.",
+        path: [delta.before === null ? "before" : "after"],
+      });
+    }
+  });
+
 export const ProcessObservationIdentitySchema = z
   .object({
     schemaVersion: SchemaVersionSchema,
@@ -139,6 +185,8 @@ export const ProcessObservationIdentitySchema = z
   .strict();
 
 export type ProcessExitedSummary = z.infer<typeof ProcessExitedSummarySchema>;
+export type FileDeltaContent = z.infer<typeof FileDeltaContentSchema>;
+export type FileDeltaPayload = z.infer<typeof FileDeltaPayloadSchema>;
 export type ProcessFailureSummary = z.infer<typeof ProcessFailureSummarySchema>;
 export type ProcessObservationIdentity = z.infer<
   typeof ProcessObservationIdentitySchema

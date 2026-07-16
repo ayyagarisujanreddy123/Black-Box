@@ -4,5 +4,18 @@
   "private": true,
   "type": "module",
   "exports": "./dist/index.js",
-  "types": "./dist/index.d.ts"
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build:assets": "vite build"
+  },
+  "dependencies": {
+    "@blackbox/protocol": "0.0.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "vite": "8.1.5"
+  }
 }

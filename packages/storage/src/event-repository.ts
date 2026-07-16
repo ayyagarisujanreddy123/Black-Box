@@ -17,6 +17,16 @@ interface EventRow {
   readonly record_json: string;
 }
 
+interface EventOriginRow {
+  readonly raw_exchange_id: string | null;
+  readonly normalization_version: string | null;
+}
+
+export interface EventOrigin {
+  readonly rawExchangeId?: string;
+  readonly normalizationVersion?: string;
+}
+
 interface NormalizationRow {
   readonly request_sha256: string | null;
   readonly response_sha256: string | null;
@@ -236,6 +246,27 @@ export class EventRepository {
       .prepare("SELECT record_json FROM events WHERE id = ?")
       .get(id) as EventRow | undefined;
     return row === undefined ? undefined : parseEventRow(row);
+  }
+
+  getOrigin(id: string): EventOrigin | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT raw_exchange_id, normalization_version
+         FROM events
+         WHERE id = ?`,
+      )
+      .get(id) as EventOriginRow | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      ...(row.raw_exchange_id === null
+        ? {}
+        : { rawExchangeId: row.raw_exchange_id }),
+      ...(row.normalization_version === null
+        ? {}
+        : { normalizationVersion: row.normalization_version }),
+    };
   }
 
   getNormalization(

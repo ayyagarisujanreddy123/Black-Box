@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   BlackBoxEventSchema,
+  RawExchangeSchema,
   SessionSchema,
   type BlackBoxEvent,
   type Session,
@@ -131,6 +132,36 @@ describe("evidence query service", () => {
     storage.events.insert(
       event("event-late", 3, TIMES[2], "proxy", "needle later response"),
     );
+    storage.rawExchanges.insertComplete(
+      RawExchangeSchema.parse({
+        schemaVersion: 1,
+        id: "exchange-query",
+        sessionId: "session-newest",
+        sequence: 4,
+        protocol: "openai.responses",
+        method: "POST",
+        path: "/v1/responses",
+        query: {},
+        requestHeaders: { "content-type": ["application/json"] },
+        responseStatus: 200,
+        responseHeaders: { "content-type": ["application/json"] },
+        startedAt: TIMES[1],
+        endedAt: TIMES[2],
+        outcome: "completed",
+        parseStatus: "pending",
+        capture: {
+          requestComplete: true,
+          responseComplete: true,
+          droppedRequestBytes: 0,
+          droppedResponseBytes: 0,
+        },
+      }),
+    );
+    storage.events.insertNormalization({
+      exchangeId: "exchange-query",
+      parserVersion: "query-test-v1",
+      events: [event("event-origin", 4, TIMES[2], "proxy", "origin evidence")],
+    });
     const service = new EvidenceQueryService(storage);
 
     expect(
@@ -140,7 +171,7 @@ describe("evidence query service", () => {
           occurredAfter: TIMES[1],
         })
         .events.map((value) => value.id),
-    ).toEqual(["event-late"]);
+    ).toEqual(["event-late", "event-origin"]);
     const first = service.listEvents("session-newest", { limit: 1 });
     const second = service.listEvents("session-newest", {
       limit: 1,
@@ -165,6 +196,13 @@ describe("evidence query service", () => {
     expect(service.listFileChanges("session-newest").changes).toMatchObject([
       { event: { id: "event-file" }, change: null },
     ]);
+    expect(service.getEvent("event-origin")).toMatchObject({
+      normalizationVersion: "query-test-v1",
+      rawExchange: {
+        id: "exchange-query",
+        responseHeaders: { "content-type": ["application/json"] },
+      },
+    });
     expect(() => service.getSession("session-missing")).toThrow(
       EvidenceQueryNotFoundError,
     );

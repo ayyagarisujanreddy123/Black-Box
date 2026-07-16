@@ -8,6 +8,7 @@ import {
 } from "./common.js";
 import { BlackBoxEventSchema } from "./event.js";
 import { WorkspaceFileChangeSummarySchema } from "./process.js";
+import { RawExchangeSchema } from "./raw-exchange.js";
 import { SessionSchema } from "./session.js";
 
 export const QueryCursorSchema = z.string().min(1).max(4096);
@@ -76,6 +77,8 @@ export const EventDetailSchema = z
     schemaVersion: SchemaVersionSchema,
     event: BlackBoxEventSchema,
     fileChange: WorkspaceFileChangeSummarySchema.optional(),
+    rawExchange: RawExchangeSchema.optional(),
+    normalizationVersion: z.string().trim().min(1).max(256).optional(),
   })
   .strict();
 

@@ -5,6 +5,7 @@ import {
   BlameResultSchema,
   ContextResultSchema,
   CONTEXT_VISIBILITY_NOTICE,
+  FileDeltaPayloadSchema,
   IncidentReportSchema,
   parseCurrentRecord,
   PreservedRecordSchema,
@@ -141,6 +142,33 @@ describe("versioned evidence contracts", () => {
 
     expect(event.type).toBe("provider.future_item");
     expect(event.payloadRef?.id).toBe("blob-1");
+  });
+
+  it("validates retained file delta state transitions", () => {
+    const side = {
+      sha256: "a".repeat(64),
+      byteLength: 3,
+      encoding: "base64",
+      content: "b2xk",
+    } as const;
+    expect(
+      FileDeltaPayloadSchema.parse({
+        schemaVersion: 1,
+        path: "README.md",
+        operation: "modify",
+        before: side,
+        after: { ...side, content: "bmV3" },
+      }).operation,
+    ).toBe("modify");
+    expect(
+      FileDeltaPayloadSchema.safeParse({
+        schemaVersion: 1,
+        path: "created.ts",
+        operation: "create",
+        before: side,
+        after: side,
+      }).success,
+    ).toBe(false);
   });
 });
 

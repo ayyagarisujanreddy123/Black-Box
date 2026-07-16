@@ -61,11 +61,9 @@ function assertImmutableIdentity(
     JSON.stringify(existing.query) !== JSON.stringify(replacement.query) ||
     JSON.stringify(existing.requestHeaders) !==
       JSON.stringify(replacement.requestHeaders) ||
-    JSON.stringify(existing.requestBodyRef) !==
-      JSON.stringify(replacement.requestBodyRef) ||
-    existing.capture.requestComplete !== replacement.capture.requestComplete ||
-    existing.capture.droppedRequestBytes !==
-      replacement.capture.droppedRequestBytes;
+    (existing.requestBodyRef !== undefined &&
+      JSON.stringify(existing.requestBodyRef) !==
+        JSON.stringify(replacement.requestBodyRef));
 
   if (identityChanged) {
     throw new ImmutableEvidenceError(
@@ -160,6 +158,7 @@ export class RawExchangeRepository {
     const result = this.database
       .prepare(
         `UPDATE raw_exchanges SET
+           request_blob_id = @requestBlobId,
            response_status = @responseStatus,
            response_headers_json = @responseHeadersJson,
            response_blob_id = @responseBlobId,

@@ -440,6 +440,28 @@ describe("content-addressed blobs and chunk manifests", () => {
       builder.append("response", Buffer.from("late"), 1_029n),
     ).toThrow(RangeError);
   });
+
+  it("bounds chunk provenance and accounts for dropped manifest entries", () => {
+    const builder = new ChunkManifestBuilder(
+      "exchange-bounded-chunks",
+      1_000n,
+      2,
+    );
+    builder.append("request", Buffer.from("abc"), 1_010n);
+    builder.append("response", Buffer.from("xy"), 1_020n);
+    expect(
+      builder.append("request", Buffer.from("defg"), 1_030n),
+    ).toBeUndefined();
+
+    const manifest = builder.build(true);
+    expect(manifest).toMatchObject({
+      completed: true,
+      truncated: true,
+      droppedEntryCount: 1,
+      droppedByteCount: 4,
+    });
+    expect(manifest.entries).toHaveLength(2);
+  });
 });
 
 describe("repositories, recovery, and stable ordering", () => {

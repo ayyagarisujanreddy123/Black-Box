@@ -40,9 +40,15 @@ function values(value: string | string[] | undefined): string[] {
 
 export function headersForForwarding(
   headers: IncomingHttpHeaders,
-  options: { readonly dropHost?: boolean } = {},
+  options: {
+    readonly dropHost?: boolean;
+    readonly dropNames?: readonly string[];
+  } = {},
 ): OutgoingHttpHeaders {
   const connectionSpecific = connectionTokens(headers);
+  const explicitlyDropped = new Set(
+    (options.dropNames ?? []).map((name) => name.toLowerCase()),
+  );
   const result: OutgoingHttpHeaders = {};
 
   for (const [originalName, originalValue] of Object.entries(headers)) {
@@ -50,6 +56,7 @@ export function headersForForwarding(
     if (
       STANDARD_HOP_BY_HOP_HEADERS.has(name) ||
       connectionSpecific.has(name) ||
+      explicitlyDropped.has(name) ||
       (options.dropHost === true && name === "host") ||
       originalValue === undefined
     ) {

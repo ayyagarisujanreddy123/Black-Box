@@ -20,6 +20,8 @@ export interface ProxyConfigurationInput {
   readonly captureQueueMaxBytes?: number;
   readonly maxRequestBodyBytes?: number;
   readonly maxResponseBodyBytes?: number;
+  readonly maxChunkManifestEntries?: number;
+  readonly upstreamTimeoutMs?: number;
 }
 
 export interface ProxyConfiguration {
@@ -30,15 +32,23 @@ export interface ProxyConfiguration {
   readonly captureQueueMaxBytes: number;
   readonly maxRequestBodyBytes: number;
   readonly maxResponseBodyBytes: number;
+  readonly maxChunkManifestEntries: number;
+  readonly upstreamTimeoutMs?: number;
 }
 
 const HostSchema = z.string().trim().min(1).max(253);
-const PortSchema = z.number().int().min(1).max(65_535);
+const PortSchema = z.number().int().min(0).max(65_535);
 const ByteLimitSchema = z
   .number()
   .int()
   .positive()
   .max(1024 * 1024 * 1024);
+const TimeoutSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(24 * 60 * 60 * 1000);
+const ManifestEntryLimitSchema = z.number().int().positive().max(1_000_000);
 
 function normalizedHost(host: string): string {
   const withoutBrackets =
@@ -135,7 +145,7 @@ export function resolveProxyConfiguration(
     upstream,
     allowNonLoopback,
     captureQueueMaxBytes: ByteLimitSchema.parse(
-      input.captureQueueMaxBytes ?? 4 * 1024 * 1024,
+      input.captureQueueMaxBytes ?? 96 * 1024 * 1024,
     ),
     maxRequestBodyBytes: ByteLimitSchema.parse(
       input.maxRequestBodyBytes ?? 16 * 1024 * 1024,
@@ -143,5 +153,11 @@ export function resolveProxyConfiguration(
     maxResponseBodyBytes: ByteLimitSchema.parse(
       input.maxResponseBodyBytes ?? 64 * 1024 * 1024,
     ),
+    maxChunkManifestEntries: ManifestEntryLimitSchema.parse(
+      input.maxChunkManifestEntries ?? 100_000,
+    ),
+    ...(input.upstreamTimeoutMs === undefined
+      ? {}
+      : { upstreamTimeoutMs: TimeoutSchema.parse(input.upstreamTimeoutMs) }),
   };
 }

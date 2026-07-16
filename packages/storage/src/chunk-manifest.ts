@@ -24,10 +24,28 @@ export const ChunkManifestSchema = z
     exchangeId: IdentifierSchema,
     startedMonotonicNs: BigIntStringSchema,
     completed: z.boolean(),
+    truncated: z.boolean(),
+    droppedEntryCount: z.number().int().nonnegative(),
+    droppedByteCount: z.number().int().nonnegative(),
     entries: z.array(ChunkManifestEntrySchema),
   })
   .strict()
   .superRefine((manifest, context) => {
+    if (manifest.truncated !== manifest.droppedEntryCount > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Manifest truncation must agree with the dropped entry count",
+        path: ["truncated"],
+      });
+    }
+    if (!manifest.truncated && manifest.droppedByteCount !== 0) {
+      context.addIssue({
+        code: "custom",
+        message: "A complete manifest cannot report dropped bytes",
+        path: ["droppedByteCount"],
+      });
+    }
+
     const offsets = { request: 0, response: 0 };
     let previousMonotonic = -1n;
 
@@ -66,22 +84,49 @@ export class ChunkManifestBuilder {
   private readonly entries: ChunkManifestEntry[] = [];
   private readonly offsets = { request: 0, response: 0 };
   private lastObservedNs: bigint;
+  private droppedEntries = 0;
+  private droppedBytes = 0;
 
   constructor(
     readonly exchangeId: string,
     readonly startedMonotonicNs: bigint = process.hrtime.bigint(),
+    readonly maximumEntries: number = 100_000,
   ) {
     IdentifierSchema.parse(exchangeId);
+    if (!Number.isInteger(maximumEntries) || maximumEntries < 1) {
+      throw new RangeError(
+        "Chunk manifest entry limit must be a positive integer.",
+      );
+    }
     this.lastObservedNs = startedMonotonicNs;
+  }
+
+  get truncated(): boolean {
+    return this.droppedEntries > 0;
+  }
+
+  get droppedEntryCount(): number {
+    return this.droppedEntries;
+  }
+
+  get droppedByteCount(): number {
+    return this.droppedBytes;
   }
 
   append(
     direction: "request" | "response",
     chunk: Uint8Array,
     observedAtNs: bigint = process.hrtime.bigint(),
-  ): ChunkManifestEntry {
+  ): ChunkManifestEntry | undefined {
     if (observedAtNs < this.lastObservedNs) {
       throw new RangeError("Chunk monotonic time cannot move backward.");
+    }
+
+    if (this.entries.length >= this.maximumEntries) {
+      this.droppedEntries += 1;
+      this.droppedBytes += chunk.byteLength;
+      this.lastObservedNs = observedAtNs;
+      return undefined;
     }
 
     const entry = ChunkManifestEntrySchema.parse({
@@ -104,6 +149,9 @@ export class ChunkManifestBuilder {
       exchangeId: this.exchangeId,
       startedMonotonicNs: this.startedMonotonicNs.toString(),
       completed,
+      truncated: this.truncated,
+      droppedEntryCount: this.droppedEntries,
+      droppedByteCount: this.droppedBytes,
       entries: this.entries,
     });
   }

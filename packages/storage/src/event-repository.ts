@@ -1,0 +1,385 @@
+import {
+  BlackBoxEventSchema,
+  RawExchangeSchema,
+  type BlackBoxEvent,
+  type RawExchange,
+} from "@blackbox/protocol";
+import type Database from "better-sqlite3";
+
+import { ImmutableEvidenceError, StorageIntegrityError } from "./errors.js";
+
+interface EventRow {
+  readonly record_json: string;
+}
+
+interface NormalizationRow {
+  readonly request_sha256: string | null;
+  readonly response_sha256: string | null;
+  readonly event_ids_json: string;
+}
+
+interface RawRecordRow {
+  readonly record_json: string;
+}
+
+export interface EventCursorPage {
+  readonly events: BlackBoxEvent[];
+  readonly nextCursor?: string;
+}
+
+export interface EventListOptions {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly type?: string;
+}
+
+export interface NormalizationInput {
+  readonly exchangeId: string;
+  readonly parserVersion: string;
+  readonly events: readonly BlackBoxEvent[];
+  readonly completedAt?: string;
+}
+
+export interface NormalizationResult {
+  readonly inserted: boolean;
+  readonly eventIds: readonly string[];
+}
+
+interface EventCursor {
+  readonly sequence: number;
+  readonly id: string;
+}
+
+function encodeCursor(cursor: EventCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string): EventCursor {
+  try {
+    const value = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as Partial<EventCursor>;
+
+    if (
+      !Number.isInteger(value.sequence) ||
+      (value.sequence ?? 0) < 1 ||
+      typeof value.id !== "string" ||
+      value.id.length === 0
+    ) {
+      throw new Error("invalid cursor fields");
+    }
+
+    return { sequence: value.sequence as number, id: value.id };
+  } catch (error: unknown) {
+    throw new RangeError("Invalid event cursor.", { cause: error });
+  }
+}
+
+function parseEventRow(row: EventRow): BlackBoxEvent {
+  return BlackBoxEventSchema.parse(JSON.parse(row.record_json));
+}
+
+function exchangeHashes(exchange: RawExchange): {
+  requestSha256: string | null;
+  responseSha256: string | null;
+} {
+  return {
+    requestSha256: exchange.requestBodyRef?.sha256 ?? null,
+    responseSha256: exchange.responseBodyRef?.sha256 ?? null,
+  };
+}
+
+export class EventRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  insert(
+    input: BlackBoxEvent,
+    origin: {
+      readonly rawExchangeId?: string;
+      readonly normalizationVersion?: string;
+    } = {},
+    now: string = new Date().toISOString(),
+  ): BlackBoxEvent {
+    const event = BlackBoxEventSchema.parse(input);
+    this.database.transaction(() => {
+      this.insertRow(event, origin, now);
+    })();
+    return event;
+  }
+
+  insertNormalization(input: NormalizationInput): NormalizationResult {
+    const completedAt = input.completedAt ?? new Date().toISOString();
+    const exchange = this.getRawExchange(input.exchangeId);
+    const hashes = exchangeHashes(exchange);
+    const events = input.events.map((event) =>
+      BlackBoxEventSchema.parse(event),
+    );
+    const existing = this.getNormalizationRow(
+      input.exchangeId,
+      input.parserVersion,
+    );
+
+    if (existing !== undefined) {
+      if (
+        existing.request_sha256 !== hashes.requestSha256 ||
+        existing.response_sha256 !== hashes.responseSha256
+      ) {
+        throw new StorageIntegrityError(
+          `Raw hashes changed after normalization of exchange ${input.exchangeId}.`,
+        );
+      }
+
+      const existingEventIds = JSON.parse(existing.event_ids_json) as string[];
+      const requestedEventIds = events.map((event) => event.id);
+      if (
+        JSON.stringify(existingEventIds) !== JSON.stringify(requestedEventIds)
+      ) {
+        throw new StorageIntegrityError(
+          `Parser ${input.parserVersion} produced conflicting events for exchange ${input.exchangeId}.`,
+        );
+      }
+
+      return {
+        inserted: false,
+        eventIds: existingEventIds,
+      };
+    }
+
+    if (events.some((event) => event.sessionId !== exchange.sessionId)) {
+      throw new ImmutableEvidenceError(
+        "Normalized events must belong to the raw exchange session.",
+      );
+    }
+
+    this.database.transaction(() => {
+      for (const event of events) {
+        this.insertRow(
+          event,
+          {
+            rawExchangeId: input.exchangeId,
+            normalizationVersion: input.parserVersion,
+          },
+          completedAt,
+        );
+      }
+
+      this.database
+        .prepare(
+          `INSERT INTO normalization_runs(
+             exchange_id, parser_version, request_sha256, response_sha256,
+             event_ids_json, completed_at
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.exchangeId,
+          input.parserVersion,
+          hashes.requestSha256,
+          hashes.responseSha256,
+          JSON.stringify(events.map((event) => event.id)),
+          completedAt,
+        );
+
+      const updatedRaw = RawExchangeSchema.parse({
+        ...exchange,
+        parseStatus: "parsed",
+      });
+      this.database
+        .prepare(
+          `UPDATE raw_exchanges
+           SET parse_status = 'parsed', record_json = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(JSON.stringify(updatedRaw), completedAt, input.exchangeId);
+    })();
+
+    return { inserted: true, eventIds: events.map((event) => event.id) };
+  }
+
+  get(id: string): BlackBoxEvent | undefined {
+    const row = this.database
+      .prepare("SELECT record_json FROM events WHERE id = ?")
+      .get(id) as EventRow | undefined;
+    return row === undefined ? undefined : parseEventRow(row);
+  }
+
+  count(sessionId: string): number {
+    const row = this.database
+      .prepare("SELECT COUNT(*) AS count FROM events WHERE session_id = ?")
+      .get(sessionId) as { count: number };
+    return row.count;
+  }
+
+  list(sessionId: string, options: EventListOptions = {}): EventCursorPage {
+    const limit = Math.max(1, Math.min(options.limit ?? 100, 1000));
+    const cursor =
+      options.cursor === undefined
+        ? { sequence: 0, id: "" }
+        : decodeCursor(options.cursor);
+    const rows = this.database
+      .prepare(
+        `SELECT record_json
+         FROM events
+         WHERE session_id = @sessionId
+           AND (sequence > @sequence OR (sequence = @sequence AND id > @id))
+           AND (@type IS NULL OR type = @type)
+         ORDER BY sequence ASC, id ASC
+         LIMIT @fetchLimit`,
+      )
+      .all({
+        sessionId,
+        sequence: cursor.sequence,
+        id: cursor.id,
+        type: options.type ?? null,
+        fetchLimit: limit + 1,
+      }) as EventRow[];
+    const hasMore = rows.length > limit;
+    const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+    const events = visibleRows.map(parseEventRow);
+    const last = events.at(-1);
+
+    return {
+      events,
+      ...(hasMore && last !== undefined
+        ? { nextCursor: encodeCursor({ sequence: last.sequence, id: last.id }) }
+        : {}),
+    };
+  }
+
+  search(sessionId: string, query: string, limit = 50): BlackBoxEvent[] {
+    const rows = this.database
+      .prepare(
+        `SELECT events.record_json
+         FROM event_search
+         JOIN events ON events.id = event_search.event_id
+         WHERE event_search MATCH ? AND event_search.session_id = ?
+         ORDER BY bm25(event_search), events.sequence
+         LIMIT ?`,
+      )
+      .all(query, sessionId, Math.max(1, Math.min(limit, 200))) as EventRow[];
+    return rows.map(parseEventRow);
+  }
+
+  rebuildSearchIndex(): number {
+    return this.database.transaction(() => {
+      this.database.exec("DELETE FROM event_search");
+      const rows = this.database
+        .prepare("SELECT id, session_id, type, summary_json FROM events")
+        .all() as Array<{
+        id: string;
+        session_id: string;
+        type: string;
+        summary_json: string;
+      }>;
+      const insert = this.database.prepare(
+        "INSERT INTO event_search(event_id, session_id, type, text) VALUES (?, ?, ?, ?)",
+      );
+
+      for (const row of rows) {
+        insert.run(row.id, row.session_id, row.type, row.summary_json);
+      }
+
+      return rows.length;
+    })();
+  }
+
+  private insertRow(
+    event: BlackBoxEvent,
+    origin: {
+      readonly rawExchangeId?: string;
+      readonly normalizationVersion?: string;
+    },
+    now: string,
+  ): void {
+    this.database
+      .prepare(
+        `INSERT INTO events(
+           id, session_id, raw_exchange_id, normalization_version, parent_id,
+           correlation_id, sequence, occurred_at, observed_at, duration_ms,
+           source, type, evidence, schema_version, payload_blob_id,
+           summary_json, redaction_json, record_json, created_at
+         ) VALUES (
+           @id, @sessionId, @rawExchangeId, @normalizationVersion, @parentId,
+           @correlationId, @sequence, @occurredAt, @observedAt, @durationMs,
+           @source, @type, @evidence, @schemaVersion, @payloadBlobId,
+           @summaryJson, @redactionJson, @recordJson, @now
+         )`,
+      )
+      .run({
+        id: event.id,
+        sessionId: event.sessionId,
+        rawExchangeId: origin.rawExchangeId ?? null,
+        normalizationVersion: origin.normalizationVersion ?? null,
+        parentId: event.parentId ?? null,
+        correlationId: event.correlationId ?? null,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+        observedAt: event.observedAt,
+        durationMs: event.durationMs ?? null,
+        source: event.source,
+        type: event.type,
+        evidence: event.evidence,
+        schemaVersion: event.schemaVersion,
+        payloadBlobId: event.payloadRef?.id ?? null,
+        summaryJson: JSON.stringify(event.summary),
+        redactionJson: JSON.stringify(event.redaction),
+        recordJson: JSON.stringify(event),
+        now,
+      });
+    this.database
+      .prepare(
+        "INSERT INTO event_search(event_id, session_id, type, text) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        event.id,
+        event.sessionId,
+        event.type,
+        JSON.stringify(event.summary),
+      );
+    this.database
+      .prepare(
+        `UPDATE sessions SET
+           event_count = event_count + 1,
+           error_count = error_count + @errorIncrement,
+           updated_at = @now
+         WHERE id = @sessionId`,
+      )
+      .run({
+        sessionId: event.sessionId,
+        errorIncrement:
+          event.type.endsWith(".error") || event.type === "session.crashed"
+            ? 1
+            : 0,
+        now,
+      });
+    this.database
+      .prepare(
+        `UPDATE session_sequences
+         SET next_sequence = MAX(next_sequence, ?)
+         WHERE session_id = ?`,
+      )
+      .run(event.sequence + 1, event.sessionId);
+  }
+
+  private getRawExchange(id: string): RawExchange {
+    const row = this.database
+      .prepare("SELECT record_json FROM raw_exchanges WHERE id = ?")
+      .get(id) as RawRecordRow | undefined;
+    if (row === undefined) {
+      throw new ImmutableEvidenceError(`Raw exchange ${id} does not exist.`);
+    }
+    return RawExchangeSchema.parse(JSON.parse(row.record_json));
+  }
+
+  private getNormalizationRow(
+    exchangeId: string,
+    parserVersion: string,
+  ): NormalizationRow | undefined {
+    return this.database
+      .prepare(
+        `SELECT request_sha256, response_sha256, event_ids_json
+         FROM normalization_runs
+         WHERE exchange_id = ? AND parser_version = ?`,
+      )
+      .get(exchangeId, parserVersion) as NormalizationRow | undefined;
+  }
+}

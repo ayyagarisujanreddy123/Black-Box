@@ -1,0 +1,41 @@
+{
+  "name": "blackbox",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local flight recorder for AI coding agents",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "npm@10.9.3",
+  "scripts": {
+    "blackbox": "node apps/cli/dist/bin.js",
+    "build": "tsc -b --pretty false",
+    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build",
+    "clean": "tsc -b --clean",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint . --max-warnings=0",
+    "test": "npm run test:unit",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.check.json --pretty false"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.20.1",
+    "eslint": "10.7.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.7.0",
+    "prettier": "3.9.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

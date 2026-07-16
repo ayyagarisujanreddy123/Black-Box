@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/normalizers" },
+    { "path": "./packages/context" },
+    { "path": "./packages/analysis" },
+    { "path": "./packages/adapters" },
+    { "path": "./packages/test-fixtures" },
+    { "path": "./apps/daemon" },
+    { "path": "./apps/viewer" },
+    { "path": "./apps/demo-agent" },
+    { "path": "./apps/cli" }
+  ]
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+demo/rogue-repo-template/
+design.md
+package-lock.json
+plan.md

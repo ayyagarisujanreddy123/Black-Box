@@ -1,0 +1,11 @@
+{
+  "name": "@blackbox/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "blackbox": "./dist/bin.js"
+  },
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "blackbox-rogue-demo-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/check-build.mjs",
+    "test": "node --test"
+  }
+}

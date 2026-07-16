@@ -1,4 +1,3 @@
-export const normalizerFoundation = {
-  milestone: 0,
-  status: "fixtures-ready",
-} as const;
+export * from "./contracts.js";
+export * from "./events.js";
+export * from "./sse.js";

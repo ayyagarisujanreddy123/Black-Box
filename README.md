@@ -1,16 +1,19 @@
-# Black Box
-
-```text
+<h1 align="center">
+<pre align="center">
 ██████╗ ██╗      █████╗  ██████╗██╗  ██╗    ██████╗  ██████╗ ██╗  ██╗
 ██╔══██╗██║     ██╔══██╗██╔════╝██║ ██╔╝    ██╔══██╗██╔═══██╗╚██╗██╔╝
 ██████╔╝██║     ███████║██║     █████╔╝     ██████╔╝██║   ██║ ╚███╔╝
 ██╔══██╗██║     ██╔══██║██║     ██╔═██╗     ██╔══██╗██║   ██║ ██╔██╗
 ██████╔╝███████╗██║  ██║╚██████╗██║  ██╗    ██████╔╝╚██████╔╝██╔╝ ██╗
 ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
+</pre>
+</h1>
 
-LOCAL FLIGHT RECORDER FOR AI CODING AGENTS
-EVIDENCE, NOT GUESSWORK.
-```
+<p align="center">
+  <samp><strong>LOCAL FLIGHT RECORDER FOR AI CODING AGENTS</strong></samp>
+  <br />
+  <samp>EVIDENCE, NOT GUESSWORK.</samp>
+</p>
 
 Black Box records what an AI coding agent saw, said, called, printed, and changed—then turns that evidence into an investigation you can inspect locally.
 

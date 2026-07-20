@@ -1,13 +1,18 @@
 import { Buffer } from "node:buffer";
 
-import { BlackBoxEventSchema, type BlackBoxEvent } from "@blackbox/protocol";
+import {
+  BlackBoxEventSchema,
+  ContextResultSchema,
+  CONTEXT_VISIBILITY_NOTICE,
+  type BlackBoxEvent,
+} from "@blackbox/protocol";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { parseViewerBootstrap } from "../src/bootstrap.js";
 import { decodeFileDelta } from "../src/diff.js";
-import { JsonBlock } from "../src/inspector.js";
+import { ContextView, JsonBlock } from "../src/inspector.js";
 import { TimelineView } from "../src/timeline-view.js";
 import {
   classifyEvent,
@@ -114,6 +119,74 @@ describe("viewer evidence model", () => {
     );
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("renders context completeness, usage, limitations, and provenance", () => {
+    const malicious = "<img src=x onerror=globalThis.compromised=true>";
+    const context = ContextResultSchema.parse({
+      schemaVersion: 1,
+      requestEventId: "event-context",
+      completeness: "partial-client-chain",
+      items: [
+        {
+          id: "context-item-0",
+          position: 0,
+          kind: "message",
+          role: "user",
+          evidence: "observed",
+          summary: { text: malicious },
+          provenance: {
+            eventId: "event-context",
+            exchangeId: "exchange-context",
+          },
+        },
+      ],
+      ancestry: {
+        nodes: [
+          {
+            id: "response-missing",
+            kind: "missing",
+            locallyAvailable: false,
+          },
+          {
+            id: "event-context",
+            kind: "request",
+            locallyAvailable: true,
+          },
+        ],
+        edges: [
+          {
+            from: "response-missing",
+            to: "event-context",
+            relation: "previous-response",
+            evidence: "observed",
+          },
+        ],
+      },
+      reportedInputTokens: 120,
+      estimatedInputTokens: 98,
+      modelContextLimit: null,
+      limitationReasons: ["Previous response is unavailable locally."],
+      visibilityNotice: CONTEXT_VISIBILITY_NOTICE,
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(ContextView, {
+        context,
+        onSelectEvent: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Partial client chain");
+    expect(html).toContain("120");
+    expect(html).toContain("98");
+    expect(html).toContain("Previous response is unavailable locally.");
+    expect(html).toContain("exchange-context");
+    expect(html).toContain("context-provenance-link");
+    expect(html).not.toContain("<img");
+    expect(html).toContain(
+      "&lt;img src=x onerror=globalThis.compromised=true&gt;",
+    );
   });
 
   it("renders only a bounded window for a 10,000-event timeline", () => {

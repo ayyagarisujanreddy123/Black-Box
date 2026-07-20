@@ -384,8 +384,8 @@ describe("byte-faithful recorder proxy", () => {
         transports: ["http-json", "http-sse"],
       },
       normalizerVersions: {
-        "openai.responses": "1.0.0",
-        "openai.chat-completions": "1.0.0",
+        "openai.responses": "1.1.0",
+        "openai.chat-completions": "1.1.0",
         "unknown-openai-compatible": "1.0.0",
       },
     });

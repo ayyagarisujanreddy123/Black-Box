@@ -6,7 +6,7 @@
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build:assets": "vite build"
+    "build:assets": "vite build && node ./scripts/package-assets.mjs"
   },
   "dependencies": {
     "@blackbox/protocol": "0.0.0",

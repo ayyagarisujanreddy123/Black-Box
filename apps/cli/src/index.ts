@@ -11,14 +11,21 @@ import {
   ensureControlToken,
   ensureInstallLayout,
   isProcessAlive,
+  readControlToken,
   readDaemonLockRecord,
   sessionScopedProxyBaseUrl,
   type DaemonLockRecord,
   type DaemonPaths,
   type DaemonStatus,
 } from "@blackbox/daemon";
+import { IdentifierSchema } from "@blackbox/protocol";
 import { openBlackBoxStorage } from "@blackbox/storage";
 
+import {
+  createViewerUrl,
+  openSystemBrowser,
+  type BrowserOpener,
+} from "./browser.js";
 import {
   CliUsageError,
   integerFlag,
@@ -51,6 +58,7 @@ const HELP = `Black Box — the flight recorder for AI coding agents
 Usage:
   blackbox init [--home PATH]
   blackbox start [--upstream URL] [--proxy-port PORT] [--control-port PORT]
+  blackbox open [session-id] [--upstream URL] [--control-port PORT]
   blackbox stop [--timeout-ms MS]
   blackbox status [--json]
   blackbox doctor [--upstream URL] [--websocket] [--json]
@@ -98,6 +106,7 @@ export interface CliRuntime {
   readonly stderr: CliOutput;
   readonly environment: NodeJS.ProcessEnv;
   readonly launchDaemon: DaemonLauncher;
+  readonly openBrowser: BrowserOpener;
   readonly now: () => Date;
   readonly signalSource: SignalEventSource;
 }
@@ -107,6 +116,7 @@ const DEFAULT_RUNTIME: CliRuntime = {
   stderr: process.stderr,
   environment: process.env,
   launchDaemon: launchDaemonProcess,
+  openBrowser: openSystemBrowser,
   now: () => new Date(),
   signalSource: process,
 };
@@ -262,6 +272,47 @@ async function commandStart(
     alreadyRunning
       ? "Black Box daemon already running"
       : "Black Box daemon started",
+  );
+  return 0;
+}
+
+async function commandOpen(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const requestedSessionId = parsed.positionals[0];
+  const parsedSession =
+    requestedSessionId === undefined
+      ? undefined
+      : IdentifierSchema.safeParse(requestedSessionId);
+  if (parsedSession !== undefined && !parsedSession.success) {
+    throw new CliUsageError("open session ID must be 1 to 512 characters.");
+  }
+  const sessionId = parsedSession?.data;
+  const configuration = resolveStartConfiguration(
+    parsed.flags,
+    runtime.environment,
+  );
+
+  if (sessionId !== undefined) {
+    const storage = await openInspectionStorage(configuration.paths);
+    try {
+      if (storage.sessions.get(sessionId) === undefined) {
+        throw new Error(`Session ${sessionId} does not exist.`);
+      }
+    } finally {
+      storage.close();
+    }
+  }
+
+  const { status } = await ensureDaemonReady(configuration, runtime);
+  const token = await readControlToken(configuration.paths.tokenPath);
+  const url = createViewerUrl(status.controlOrigin, token, sessionId);
+  await runtime.openBrowser(url);
+  runtime.stdout.write(
+    sessionId === undefined
+      ? `Opened Black Box cockpit at ${url.origin}.\n`
+      : `Opened Black Box cockpit for session ${sessionId}.\n`,
   );
   return 0;
 }
@@ -856,6 +907,8 @@ export async function runCli(
         return await commandInit(parsed, runtime);
       case "start":
         return await commandStart(parsed, runtime);
+      case "open":
+        return await commandOpen(parsed, runtime);
       case "stop":
         return await commandStop(parsed, runtime);
       case "status":
@@ -881,6 +934,7 @@ export async function runCli(
 }
 
 export * from "./configuration.js";
+export * from "./browser.js";
 export * from "./control-client.js";
 export * from "./daemon-launcher.js";
 export * from "./doctor.js";
@@ -889,3 +943,4 @@ export * from "./run/cleanup-deadline.js";
 export * from "./run/signal-forwarder.js";
 export * from "./run/workspace-observer.js";
 export * from "./run/workspace-watcher.js";
+export * from "./viewer-assets.js";

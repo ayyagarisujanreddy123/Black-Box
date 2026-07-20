@@ -16,3 +16,4 @@ export * from "./proxy/headers.js";
 export * from "./proxy/recorder-proxy.js";
 export * from "./proxy/session-route.js";
 export * from "./sessionization/sessionizer.js";
+export * from "./viewer/viewer-assets.js";

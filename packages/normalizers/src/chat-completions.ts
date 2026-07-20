@@ -12,7 +12,7 @@ import { SseReplayDetector } from "./duplicates.js";
 import { materializeCanonicalEvents } from "./events.js";
 import { decodeSseChunks, type SseFrame } from "./sse.js";
 
-export const CHAT_COMPLETIONS_NORMALIZER_VERSION = "1.0.0";
+export const CHAT_COMPLETIONS_NORMALIZER_VERSION = "1.1.0";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -179,6 +179,51 @@ function requestToolResults(request: JsonRecord | undefined) {
   return drafts;
 }
 
+function requestObject(
+  exchange: NormalizationExchange,
+  diagnostics: ParserDiagnostic[],
+): JsonRecord | undefined {
+  try {
+    const value = decodeJson(exchange.requestBody);
+    if (value === undefined) {
+      return undefined;
+    }
+    if (!isRecord(value)) {
+      diagnostics.push(
+        diagnostic("invalid-payload", "Chat request must be an object."),
+      );
+      return undefined;
+    }
+    return value;
+  } catch (error: unknown) {
+    diagnostics.push(
+      diagnostic(
+        "malformed-json",
+        `Chat request JSON could not be decoded: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+    return undefined;
+  }
+}
+
+function requestEvidenceDrafts(
+  exchange: NormalizationExchange,
+  request: JsonRecord | undefined,
+): CanonicalEventDraft[] {
+  return [
+    ...requestToolResults(request),
+    {
+      type: "model.request",
+      summary: {
+        endpoint: exchange.path,
+        ...(stringValue(request?.model) === undefined
+          ? {}
+          : { model: stringValue(request?.model) }),
+      },
+    },
+  ];
+}
+
 function toolCallDrafts(
   calls: unknown,
   diagnostics: ParserDiagnostic[],
@@ -247,25 +292,8 @@ function normalizeJson(
 ): NormalizationResult {
   const parserId = "openai.chat-completions.json";
   const diagnostics: ParserDiagnostic[] = [];
-  let request: JsonRecord | undefined;
+  const request = requestObject(exchange, diagnostics);
   let response: JsonRecord | undefined;
-  try {
-    const decoded = decodeJson(exchange.requestBody);
-    if (isRecord(decoded)) {
-      request = decoded;
-    } else {
-      diagnostics.push(
-        diagnostic("invalid-payload", "Chat request must be an object."),
-      );
-    }
-  } catch (error: unknown) {
-    diagnostics.push(
-      diagnostic(
-        "malformed-json",
-        `Chat request JSON could not be decoded: ${error instanceof Error ? error.message : String(error)}`,
-      ),
-    );
-  }
   try {
     const decoded = decodeJson(exchange.responseBody);
     if (isRecord(decoded)) {
@@ -287,7 +315,7 @@ function normalizeJson(
     );
   }
 
-  const drafts: CanonicalEventDraft[] = [];
+  const drafts = requestEvidenceDrafts(exchange, request);
   if (response === undefined) {
     drafts.push({
       type: "parser.error",
@@ -299,17 +327,6 @@ function normalizeJson(
     if (apiError !== undefined) {
       drafts.push(apiError);
     } else {
-      drafts.push(...requestToolResults(request));
-      drafts.push({
-        type: "model.request",
-        summary: {
-          endpoint: exchange.path,
-          ...(stringValue(request?.model) === undefined
-            ? {}
-            : { model: stringValue(request?.model) }),
-        },
-      });
-
       const choices = Array.isArray(response.choices) ? response.choices : [];
       for (const choiceValue of choices) {
         if (!isRecord(choiceValue)) {
@@ -508,6 +525,8 @@ function normalizeSse(
   const parserErrors: CanonicalEventDraft[] = [];
   const duplicateErrors: CanonicalEventDraft[] = [];
   const unknownFrames: CanonicalEventDraft[] = [];
+  const request = requestObject(exchange, diagnostics);
+  const requestEvidence = requestEvidenceDrafts(exchange, request);
   const choices = new Map<number, ChoiceAssembly>();
   let responseId: string | undefined;
   let reportedUsage: ChatUsage | undefined;
@@ -748,8 +767,9 @@ function normalizeSse(
 
   const drafts =
     parserErrors.length === 0
-      ? [...duplicateErrors, ...semantic]
+      ? [...requestEvidence, ...duplicateErrors, ...semantic]
       : [
+          ...requestEvidence,
           ...parserErrors,
           ...duplicateErrors,
           ...semantic.filter(

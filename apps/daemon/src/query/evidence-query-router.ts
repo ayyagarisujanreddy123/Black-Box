@@ -286,14 +286,19 @@ export class EvidenceQueryRouter {
         }
         return false;
       }
-      if (route === "events" && encodedSegments.length === 3) {
-        assertAllowedParameters(url, new Set());
-        sendJson(
-          response,
-          200,
-          this.options.query.getEvent(decoded(encodedSegments[2] as string)),
-        );
-        return true;
+      if (route === "events" && encodedSegments.length >= 3) {
+        const eventId = decoded(encodedSegments[2] as string);
+        if (encodedSegments.length === 3) {
+          assertAllowedParameters(url, new Set());
+          sendJson(response, 200, this.options.query.getEvent(eventId));
+          return true;
+        }
+        if (encodedSegments.length === 4 && encodedSegments[3] === "context") {
+          assertAllowedParameters(url, new Set());
+          sendJson(response, 200, await this.options.query.getContext(eventId));
+          return true;
+        }
+        return false;
       }
       if (route === "payloads" && encodedSegments.length === 3) {
         assertAllowedParameters(url, new Set());

@@ -10,6 +10,7 @@ import {
 export type CliCommand =
   | "init"
   | "start"
+  | "open"
   | "stop"
   | "status"
   | "doctor"
@@ -36,6 +37,7 @@ export interface ResolvedStartConfiguration {
 const COMMANDS = new Set<CliCommand>([
   "init",
   "start",
+  "open",
   "stop",
   "status",
   "doctor",
@@ -43,6 +45,23 @@ const COMMANDS = new Set<CliCommand>([
   "inspect",
   "run",
 ]);
+
+const START_FLAGS = [
+  "home",
+  "upstream",
+  "proxy-host",
+  "proxy-port",
+  "control-host",
+  "control-port",
+  "capture-queue-max-bytes",
+  "max-request-body-bytes",
+  "max-response-body-bytes",
+  "max-chunk-manifest-entries",
+  "upstream-timeout-ms",
+  "shutdown-grace-ms",
+  "timeout-ms",
+  "allow-non-loopback",
+] as const;
 
 const VALUE_FLAGS = new Set([
   "home",
@@ -77,22 +96,8 @@ const BOOLEAN_FLAGS = new Set([
 
 const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   init: new Set(["home"]),
-  start: new Set([
-    "home",
-    "upstream",
-    "proxy-host",
-    "proxy-port",
-    "control-host",
-    "control-port",
-    "capture-queue-max-bytes",
-    "max-request-body-bytes",
-    "max-response-body-bytes",
-    "max-chunk-manifest-entries",
-    "upstream-timeout-ms",
-    "shutdown-grace-ms",
-    "timeout-ms",
-    "allow-non-loopback",
-  ]),
+  start: new Set(START_FLAGS),
+  open: new Set(START_FLAGS),
   stop: new Set(["home", "timeout-ms", "json"]),
   status: new Set(["home", "timeout-ms", "json"]),
   doctor: new Set([
@@ -114,20 +119,7 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   sessions: new Set(["home", "limit", "json", "include-internal"]),
   inspect: new Set(["home", "limit", "type", "cursor", "json"]),
   run: new Set([
-    "home",
-    "upstream",
-    "proxy-host",
-    "proxy-port",
-    "control-host",
-    "control-port",
-    "capture-queue-max-bytes",
-    "max-request-body-bytes",
-    "max-response-body-bytes",
-    "max-chunk-manifest-entries",
-    "upstream-timeout-ms",
-    "shutdown-grace-ms",
-    "timeout-ms",
-    "allow-non-loopback",
+    ...START_FLAGS,
     "cwd",
     "max-output-frame-bytes",
     "max-untracked-file-bytes",
@@ -229,6 +221,10 @@ export function parseCliArguments(
   } else if (command === "inspect") {
     if (!help && positionals.length !== 1) {
       throw new CliUsageError("inspect requires exactly one session ID.");
+    }
+  } else if (command === "open") {
+    if (!help && positionals.length > 1) {
+      throw new CliUsageError("open accepts at most one session ID.");
     }
   } else if (positionals.length > 0) {
     throw new CliUsageError(

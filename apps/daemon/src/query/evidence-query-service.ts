@@ -1,4 +1,6 @@
+import { ContextReconstructor } from "@blackbox/context";
 import {
+  ContextResultSchema,
   EventDetailSchema,
   EventListQuerySchema,
   EventPageSchema,
@@ -21,6 +23,7 @@ import {
   type FileChangeListQueryInput,
   type FileChangePage,
   type BlackBoxEvent,
+  type ContextResult,
   type SessionDetail,
   type SessionListQueryInput,
   type SessionPage,
@@ -64,7 +67,20 @@ function literalFtsQuery(query: string): string {
 }
 
 export class EvidenceQueryService {
-  constructor(private readonly storage: BlackBoxStorage) {}
+  private readonly context: ContextReconstructor;
+
+  constructor(private readonly storage: BlackBoxStorage) {
+    this.context = new ContextReconstructor({
+      getEvent: (eventId) => this.storage.events.get(eventId),
+      getEventOrigin: (eventId) => this.storage.events.getOrigin(eventId),
+      getExchange: (exchangeId) => this.storage.rawExchanges.get(exchangeId),
+      getEventsForExchange: (exchangeId) =>
+        this.storage.events.listForExchange(exchangeId),
+      findResponseEvent: (sessionId, responseId) =>
+        this.storage.events.findResponseEvent(sessionId, responseId),
+      getPayload: (payloadId) => this.storage.blobs.get(payloadId),
+    });
+  }
 
   listSessions(input: SessionListQueryInput = {}): SessionPage {
     const query = SessionListQuerySchema.parse(input);
@@ -137,6 +153,16 @@ export class EvidenceQueryService {
         ? {}
         : { normalizationVersion: origin.normalizationVersion }),
     });
+  }
+
+  async getContext(eventId: string): Promise<ContextResult> {
+    const { event } = this.getEvent(eventId);
+    if (event.type !== "model.request") {
+      throw new RangeError(
+        "Context is only available for model.request events.",
+      );
+    }
+    return ContextResultSchema.parse(await this.context.reconstruct(event.id));
   }
 
   listFileChanges(

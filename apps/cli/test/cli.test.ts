@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   UnsafeControlOriginError,
+  createViewerUrl,
   parseCliArguments,
   requestDaemonStatus,
   resolveStartConfiguration,
@@ -517,6 +518,113 @@ describe("CLI daemon lifecycle", () => {
     } finally {
       storage.close();
     }
+  });
+});
+
+describe("CLI cockpit opening", () => {
+  it("starts the daemon and opens a selected session through a fragment credential", async () => {
+    const root = await temporaryRoot();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const paths = resolveDaemonPaths(root);
+    const opened: URL[] = [];
+    let launches = 0;
+    const launch = async (configuration: ResolvedStartConfiguration) => {
+      launches += 1;
+      const daemon = new BlackBoxDaemon({
+        homeDirectory: configuration.paths.homeDirectory,
+        proxy: configuration.proxy,
+        control: {
+          listenHost: configuration.controlHost,
+          listenPort: configuration.controlPort,
+        },
+        shutdownGraceMilliseconds: 100,
+      });
+      daemons.push(daemon);
+      await daemon.start();
+      return process.pid;
+    };
+    const cliRuntime: Partial<CliRuntime> = {
+      ...runtime(stdout, stderr, launch),
+      openBrowser: (url) => {
+        opened.push(new URL(url));
+        return Promise.resolve();
+      },
+    };
+
+    expect(await runCli(["init", "--home", root], cliRuntime)).toBe(0);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      storage.sessions.create({
+        schemaVersion: 1,
+        id: "session-cockpit",
+        startedAt: "2026-07-16T12:00:00.000Z",
+        status: "active",
+        captureLevel: "api",
+        models: [],
+        tags: [],
+        counts: {
+          events: 0,
+          errors: 0,
+          inputTokens: null,
+          outputTokens: null,
+        },
+        metadata: {},
+      });
+    } finally {
+      storage.close();
+    }
+
+    stdout.clear();
+    expect(
+      await runCli(["open", "missing-session", "--home", root], cliRuntime),
+    ).toBe(1);
+    expect(launches).toBe(0);
+    expect(opened).toHaveLength(0);
+    expect(stderr.value).toContain("Session missing-session does not exist");
+
+    stdout.clear();
+    stderr.clear();
+    expect(
+      await runCli(
+        [
+          "open",
+          "session-cockpit",
+          "--home",
+          root,
+          "--proxy-port",
+          "0",
+          "--control-port",
+          "0",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(launches).toBe(1);
+
+    const token = await readControlToken(paths.tokenPath);
+    const url = opened[0];
+    expect(url?.origin).toBe(daemons[0]?.status().controlOrigin);
+    expect(url?.pathname).toBe("/");
+    expect(url?.search).toBe("");
+    expect(new URLSearchParams(url?.hash.slice(1))).toEqual(
+      new URLSearchParams({ token, session: "session-cockpit" }),
+    );
+    expect(stdout.value).toBe(
+      "Opened Black Box cockpit for session session-cockpit.\n",
+    );
+    expect(stdout.value).not.toContain(token);
+    expect(stderr.value).toBe("");
+  });
+
+  it("refuses to place a control token in a non-loopback viewer URL", () => {
+    expect(() =>
+      createViewerUrl("https://attacker.example", "a".repeat(43)),
+    ).toThrow("Refusing to open a non-loopback Black Box control origin");
   });
 });
 

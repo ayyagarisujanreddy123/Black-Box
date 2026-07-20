@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { ProxyConfigurationInput } from "../proxy/config.js";
 import { RecorderProxy } from "../proxy/recorder-proxy.js";
 import { EvidenceQueryService } from "../query/evidence-query-service.js";
+import { ViewerAssets } from "../viewer/viewer-assets.js";
 import { ControlServer } from "./control-server.js";
 import { ensureControlToken } from "./control-token.js";
 import { DaemonLock, type DaemonLockRecovery } from "./daemon-lock.js";
@@ -35,6 +36,7 @@ export interface BlackBoxDaemonOptions {
     readonly allowedOrigins?: readonly string[];
   };
   readonly blobStore?: BlobStoreOptions;
+  readonly viewerDirectory?: string;
   readonly shutdownGraceMilliseconds?: number;
   readonly now?: () => Date;
 }
@@ -177,11 +179,16 @@ export class BlackBoxDaemon {
         now: () => this.now(),
       });
       const proxyAddress = await this.proxyValue.start();
+      const viewerAssets =
+        this.options.viewerDirectory === undefined
+          ? undefined
+          : await ViewerAssets.load(this.options.viewerDirectory);
       this.controlValue = new ControlServer({
         token,
         status: () => this.status(),
         shutdown: () => this.stop(),
         query: new EvidenceQueryService(this.storageValue),
+        ...(viewerAssets === undefined ? {} : { viewerAssets }),
         ...this.options.control,
       });
       const controlAddress = await this.controlValue.start();

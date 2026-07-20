@@ -6,6 +6,7 @@ import {
   parseCliArguments,
   resolveStartConfiguration,
 } from "./configuration.js";
+import { packagedViewerDirectory } from "./viewer-assets.js";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -38,6 +39,7 @@ async function runDaemonWorker(arguments_: readonly string[]): Promise<number> {
         listenHost: configuration.controlHost,
         listenPort: configuration.controlPort,
       },
+      viewerDirectory: packagedViewerDirectory(),
       shutdownGraceMilliseconds: configuration.shutdownGraceMilliseconds,
     });
 

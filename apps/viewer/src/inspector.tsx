@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   BlackBoxEvent,
   BlobReference,
+  ContextCompleteness,
+  ContextResult,
   EventDetail,
 } from "@blackbox/protocol";
 
@@ -14,7 +16,13 @@ import {
 } from "./diff.js";
 
 type InspectorTab =
-  "summary" | "normalized" | "raw" | "headers" | "provenance" | "diff";
+  | "summary"
+  | "context"
+  | "normalized"
+  | "raw"
+  | "headers"
+  | "provenance"
+  | "diff";
 
 interface PayloadChoice {
   readonly label: string;
@@ -36,6 +44,166 @@ export function JsonBlock(props: {
   return (
     <pre className="json-block">{JSON.stringify(props.value, null, 2)}</pre>
   );
+}
+
+const CONTEXT_LABELS: Record<ContextCompleteness, string> = {
+  "exact-client-request": "Exact client request",
+  "reconstructed-client-chain": "Reconstructed client chain",
+  "partial-client-chain": "Partial client chain",
+  "provider-managed-context": "Provider-managed context",
+  "unknown-unsupported": "Unknown or unsupported",
+};
+
+function tokenValue(value: number | null): string {
+  return value === null ? "unavailable" : value.toLocaleString();
+}
+
+export function ContextView(props: {
+  readonly context: ContextResult;
+  readonly onSelectEvent?: (eventId: string) => void;
+}): React.JSX.Element {
+  const context = props.context;
+  return (
+    <div className="context-view">
+      <section
+        className={`context-completeness context-completeness--${context.completeness}`}
+      >
+        <span>Context completeness</span>
+        <strong>{CONTEXT_LABELS[context.completeness]}</strong>
+      </section>
+
+      <dl className="context-metrics">
+        <div>
+          <dt>Reported input</dt>
+          <dd>{tokenValue(context.reportedInputTokens)} tokens</dd>
+        </div>
+        <div>
+          <dt>Visible estimate</dt>
+          <dd>≈ {tokenValue(context.estimatedInputTokens)} tokens</dd>
+        </div>
+        <div>
+          <dt>Model limit</dt>
+          <dd>{tokenValue(context.modelContextLimit)} tokens</dd>
+        </div>
+      </dl>
+
+      <p className="context-notice">{context.visibilityNotice}</p>
+
+      {context.limitationReasons.length === 0 ? null : (
+        <section className="context-limitations" aria-label="Limitations">
+          <h3>Limitations</h3>
+          <ul>
+            {context.limitationReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <h3>Ordered visible context</h3>
+      {context.items.length === 0 ? (
+        <p className="inspector-note">
+          No API-visible context item was recovered.
+        </p>
+      ) : (
+        <ol className="context-items">
+          {context.items.map((item) => (
+            <li key={item.id}>
+              <header>
+                <span>#{item.position}</span>
+                <strong>{item.kind}</strong>
+                {item.role === undefined ? null : <em>{item.role}</em>}
+                <small>{item.evidence}</small>
+              </header>
+              <JsonBlock value={item.summary} />
+              <footer>
+                {item.provenance.eventId === undefined ||
+                props.onSelectEvent === undefined ? (
+                  <code>event {item.provenance.eventId ?? "none"}</code>
+                ) : (
+                  <button
+                    type="button"
+                    className="context-provenance-link"
+                    onClick={() => {
+                      if (item.provenance.eventId !== undefined) {
+                        props.onSelectEvent?.(item.provenance.eventId);
+                      }
+                    }}
+                  >
+                    event {item.provenance.eventId}
+                  </button>
+                )}
+                <code>exchange {item.provenance.exchangeId ?? "none"}</code>
+                {item.provenance.payloadRef === undefined ? null : (
+                  <code>payload {item.provenance.payloadRef.id}</code>
+                )}
+              </footer>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <h3>Ancestry</h3>
+      <div className="context-ancestry">
+        <ul>
+          {context.ancestry.nodes.map((node) => (
+            <li key={node.id}>
+              <span>{node.kind}</span>
+              <code>{node.id}</code>
+              <small>{node.locallyAvailable ? "local" : "not local"}</small>
+            </li>
+          ))}
+        </ul>
+        {context.ancestry.edges.length === 0 ? null : (
+          <ol>
+            {context.ancestry.edges.map((edge, index) => (
+              <li key={`${edge.from}-${edge.to}-${edge.relation}-${index}`}>
+                <code>{edge.from}</code>
+                <span>{edge.relation}</span>
+                <code>{edge.to}</code>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ContextPanel(props: {
+  readonly api: ViewerApiClient;
+  readonly eventId: string;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  const [context, setContext] = useState<ContextResult>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    let current = true;
+    setContext(undefined);
+    setError(undefined);
+    void props.api
+      .getContext(props.eventId)
+      .then((result) => current && setContext(result))
+      .catch((cause: unknown) => {
+        if (current) {
+          setError(
+            cause instanceof Error ? cause.message : "Context unavailable",
+          );
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [props.api, props.eventId]);
+
+  if (error !== undefined) {
+    return <p className="error-banner">{error}</p>;
+  }
+  if (context === undefined) {
+    return <p className="inspector-note">Reconstructing visible context…</p>;
+  }
+  return <ContextView context={context} onSelectEvent={props.onSelectEvent} />;
 }
 
 function payloadChoices(detail: EventDetail): PayloadChoice[] {
@@ -374,6 +542,7 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
   const detail = props.detail;
   const tabs: InspectorTab[] = [
     "summary",
+    ...(detail?.event.type === "model.request" ? (["context"] as const) : []),
     "normalized",
     "raw",
     "headers",
@@ -427,6 +596,13 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
       </div>
       <div className="inspector-panel" role="tabpanel">
         {tab === "summary" ? <Summary detail={detail} /> : null}
+        {tab === "context" ? (
+          <ContextPanel
+            api={props.api}
+            eventId={detail.event.id}
+            onSelectEvent={props.onSelectEvent}
+          />
+        ) : null}
         {tab === "normalized" ? <JsonBlock value={detail.event} /> : null}
         {tab === "raw" ? <RawPayload api={props.api} detail={detail} /> : null}
         {tab === "headers" ? <Headers detail={detail} /> : null}

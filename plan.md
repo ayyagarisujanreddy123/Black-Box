@@ -1,10 +1,10 @@
 # Black Box Execution Plan
 
-Status: M0–M4 complete; M5 ready to execute
+Status: M0–M6 complete; M7 ready to execute
 
 Version: 0.1
 
-Last updated: 2026-07-16
+Last updated: 2026-07-20
 
 Companion: [design.md](./design.md)
 
@@ -210,6 +210,8 @@ Exit artifact: one command records both agent API traffic and repository impact.
 
 ### M5 — Local API and cockpit vertical slice
 
+Implementation status: Complete on 2026-07-16. The exit artifact is covered by authenticated query and live-stream tests, viewer model/transport tests, CLI routing tests, and the packaged detached-daemon end-to-end test.
+
 Goal: make recorded evidence explorable during and after a session.
 
 Tasks:
@@ -236,6 +238,8 @@ Acceptance:
 Exit artifact: usable cockpit for a live rogue-demo recording.
 
 ### M6 — Context time travel
+
+Implementation status: Complete on 2026-07-20. The exit artifact is covered by reconstruction, storage/query, authenticated API, viewer transport/rendering, normalizer fixture, and packaged lifecycle tests.
 
 Goal: answer “what client-visible information preceded this request?” accurately.
 

@@ -207,4 +207,101 @@ describe("evidence query service", () => {
       EvidenceQueryNotFoundError,
     );
   });
+
+  it("reconstructs exact client-visible context from stored raw evidence", async () => {
+    const storage = await testStorage();
+    storage.sessions.create(session("session-newest", TIMES[0]));
+    const requestBody = Buffer.from(
+      JSON.stringify({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: "Stay inside the repository." },
+          { role: "user", content: "Inspect README.md." },
+        ],
+        temperature: 0,
+      }),
+      "utf8",
+    );
+    const requestBodyRef = await storage.blobs.put(requestBody, {
+      mediaType: "application/json",
+    });
+    storage.rawExchanges.insertComplete(
+      RawExchangeSchema.parse({
+        schemaVersion: 1,
+        id: "exchange-context",
+        sessionId: "session-newest",
+        sequence: 1,
+        protocol: "openai.chat-completions",
+        method: "POST",
+        path: "/v1/chat/completions",
+        query: {},
+        requestHeaders: { "content-type": ["application/json"] },
+        requestBodyRef,
+        responseStatus: 200,
+        responseHeaders: { "content-type": ["application/json"] },
+        startedAt: TIMES[0],
+        endedAt: TIMES[1],
+        outcome: "completed",
+        parseStatus: "pending",
+        capture: {
+          requestComplete: true,
+          responseComplete: true,
+          droppedRequestBytes: 0,
+          droppedResponseBytes: 0,
+        },
+      }),
+    );
+    storage.events.insertNormalization({
+      exchangeId: "exchange-context",
+      parserVersion: "context-test-v1",
+      events: [
+        BlackBoxEventSchema.parse({
+          schemaVersion: 1,
+          id: "event-context-request",
+          sessionId: "session-newest",
+          sequence: 1,
+          occurredAt: TIMES[0],
+          observedAt: TIMES[0],
+          source: "proxy",
+          type: "model.request",
+          evidence: "observed",
+          summary: { endpoint: "/v1/chat/completions" },
+          redaction: { applied: false, ruleIds: [] },
+        }),
+        BlackBoxEventSchema.parse({
+          schemaVersion: 1,
+          id: "event-context-usage",
+          sessionId: "session-newest",
+          sequence: 2,
+          occurredAt: TIMES[1],
+          observedAt: TIMES[1],
+          source: "proxy",
+          type: "model.usage",
+          evidence: "observed",
+          summary: { inputTokens: 23, outputTokens: 4, totalTokens: 27 },
+          redaction: { applied: false, ruleIds: [] },
+        }),
+      ],
+    });
+
+    const result = await new EvidenceQueryService(storage).getContext(
+      "event-context-request",
+    );
+
+    expect(result).toMatchObject({
+      requestEventId: "event-context-request",
+      completeness: "exact-client-request",
+      reportedInputTokens: 23,
+      items: [
+        { kind: "message", role: "system" },
+        { kind: "message", role: "user" },
+        { kind: "settings" },
+      ],
+    });
+    expect(result.items[0]?.provenance).toMatchObject({
+      eventId: "event-context-request",
+      exchangeId: "exchange-context",
+      payloadRef: { id: requestBodyRef.id },
+    });
+  });
 });

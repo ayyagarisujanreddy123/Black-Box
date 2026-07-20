@@ -196,11 +196,52 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       pid: number;
       state: string;
       proxyOrigin: string;
+      controlOrigin: string;
       proxy: { requestsCompleted: number };
     };
     expect(status).toMatchObject({
       state: "ready",
       proxy: { requestsCompleted: 0 },
+    });
+
+    const viewerResponse = await fetch(status.controlOrigin);
+    const viewerHtml = await viewerResponse.text();
+    expect(viewerResponse.status).toBe(200);
+    expect(viewerResponse.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(viewerResponse.headers.get("content-security-policy")).toContain(
+      "default-src 'none'",
+    );
+    expect(viewerHtml).toContain("Black Box Cockpit");
+    expect(viewerHtml).not.toContain(token);
+    const viewerScriptPath = /<script[^>]+src="([^"]+\.js)"/u.exec(
+      viewerHtml,
+    )?.[1];
+    expect(viewerScriptPath).toBeDefined();
+    const viewerScript = await fetch(
+      new URL(viewerScriptPath as string, status.controlOrigin),
+    );
+    expect(viewerScript.status).toBe(200);
+    expect(viewerScript.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect((await viewerScript.arrayBuffer()).byteLength).toBeGreaterThan(
+      100_000,
+    );
+
+    const unauthenticatedSessions = await fetch(
+      new URL("/v1/sessions?limit=1", status.controlOrigin),
+    );
+    expect(unauthenticatedSessions.status).toBe(401);
+    const authenticatedSessions = await fetch(
+      new URL("/v1/sessions?limit=1", status.controlOrigin),
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(authenticatedSessions.status).toBe(200);
+    expect(await authenticatedSessions.json()).toMatchObject({
+      schemaVersion: 1,
+      sessions: [],
     });
 
     const body = Buffer.from('{"input":"packaged-e2e"}', "utf8");

@@ -6,7 +6,7 @@ Black Box is being built as a CLI-managed localhost recorder with a browser cock
 
 ## Current status
 
-Milestones M0 through M4 provide a runnable, byte-faithful local recorder with canonical process and workspace evidence:
+Milestones M0 through M6 provide a runnable, byte-faithful local recorder with a live browser cockpit and client-visible context time travel:
 
 - strict npm/TypeScript workspace boundaries;
 - versioned Zod contracts for sessions, raw exchanges, canonical events, reconstructed context, blame results, and incident reports;
@@ -31,9 +31,16 @@ Milestones M0 through M4 provide a runnable, byte-faithful local recorder with c
 - working `blackbox run -- <command...>` with daemon reuse, session-scoped proxy injection, command metadata, byte-exact bounded stdout/stderr frames, and child exit-status preservation;
 - Git-aware and plain-directory baseline/final manifests with streamed SHA-256 hashes, tracked binary patches, and bounded file-content deltas;
 - separate debounced `approximate-watcher` timing and authoritative `exact-final-diff` file evidence, including create, modify, delete, and unchanged-content rename detection;
-- canonical-root path exclusions, Git-ignore handling, non-followed directory symlinks, bounded watcher state, Ctrl-C/SIGTERM forwarding, and abortable final cleanup.
+- canonical-root path exclusions, Git-ignore handling, non-followed directory symlinks, bounded watcher state, Ctrl-C/SIGTERM forwarding, and abortable final cleanup;
+- authenticated, schema-validated localhost queries for sessions, events, file changes, payloads, search, and health with bounded cursor pagination;
+- a bounded SSE live-event channel with sequence recovery, heartbeats, reconnect support, and slow-reader protection;
+- a packaged React cockpit with session navigation, a virtualized multi-lane timeline, search, inert raw evidence, provenance/header/diff inspection, keyboard navigation, and accessible/timestamp modes;
+- working `blackbox open [session-id]` routing through a loopback-only fragment credential without printing the control token in normal output;
+- deterministic reconstruction of explicit Chat Completions history and locally recorded Responses ancestry with cycle, depth, and recorded-sequence guards;
+- explicit exact, reconstructed, partial, provider-managed, and unsupported completeness labels with machine-readable limitation reasons;
+- an authenticated context inspector with ordered items, ancestry, clickable event provenance, opaque reasoning markers, and separate reported-versus-estimated input token counts.
 
-HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Wrapped process/filesystem observation is available at capture level L2; the browser query API and viewer begin in M5. Deterministic and optional model analysis arrive in later milestones.
+HTTP JSON and SSE are supported. WebSocket/Realtime transport is rejected explicitly and reported by `doctor`. Wrapped process/filesystem observation is available at capture level L2, and the cockpit can inspect recordings and reconstruct API-visible request context while the daemon is still writing them. Deterministic blame and optional model analysis arrive in later milestones.
 
 ## Development quickstart
 
@@ -54,12 +61,19 @@ npm run blackbox -- start
 npm run blackbox -- status
 # Point an OpenAI-compatible client at the OPENAI_BASE_URL printed by start.
 npm run blackbox -- run -- <agent-command> [arguments...]
+npm run blackbox -- open [session-id]
 npm run blackbox -- sessions
 npm run blackbox -- inspect <session-id> --json
 npm run blackbox -- stop
 ```
 
 Use `--home PATH` or `BLACKBOX_HOME` to select the private data directory. Configure the provider with `--upstream URL` or `BLACKBOX_UPSTREAM_URL`; Black Box deliberately never treats `OPENAI_BASE_URL` as its upstream because that variable points clients back to the recorder.
+
+## Context time travel
+
+Select a `model.request` event and open its **context** inspector tab. Chat Completions requests show the explicit message history sent by the client. Responses requests follow locally recorded `previous_response_id` ancestry and identify missing predecessors; Conversation objects, reusable prompt templates, server context management, unsupported payloads, and incomplete captures receive non-exact labels with the reason preserved.
+
+Context items retain raw exchange, payload, and canonical event provenance. Provider-reported input usage remains separate from Black Box's rough visible-content estimate. Black Box does not expose or invent provider-hidden instructions or private model reasoning.
 
 Session assignment follows explicit `X-Blackbox-Session`, adapter `X-Blackbox-Agent-Session`, known `X-Blackbox-Response-Ancestor`, and short client-idle grouping in that order. Internal model analysis must set `X-Blackbox-Analysis-Session` and may identify the investigated session with `X-Blackbox-Analysis-Target`; analysis isolation overrides all ordinary grouping signals. These reserved headers are recorder controls and are neither forwarded upstream nor retained in raw request headers.
 

@@ -133,8 +133,8 @@ export function MissingAuthentication(): React.JSX.Element {
       <h1>The cockpit is sealed.</h1>
       <p>
         Open this viewer through <code>blackbox open</code>. The CLI transfers a
-        short-lived local credential in the URL fragment; recordings never
-        become anonymously readable on localhost.
+        private local credential in the URL fragment; recordings never become
+        anonymously readable on localhost.
       </p>
     </main>
   );

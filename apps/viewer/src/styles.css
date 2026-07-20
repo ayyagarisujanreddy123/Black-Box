@@ -866,6 +866,203 @@ pre,
   text-transform: uppercase;
 }
 
+.context-view {
+  display: grid;
+  gap: 12px;
+}
+
+.context-completeness {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  box-shadow: inset 3px 0 var(--cyan);
+  background: var(--surface-2);
+}
+
+.context-completeness--partial-client-chain,
+.context-completeness--provider-managed-context,
+.context-completeness--unknown-unsupported {
+  box-shadow: inset 3px 0 var(--amber);
+}
+
+.context-completeness span,
+.context-metrics dt,
+.context-items header,
+.context-items footer,
+.context-ancestry {
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.context-completeness span {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.context-completeness strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.context-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.context-metrics > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  background: #0d1213;
+}
+
+.context-metrics dt {
+  color: var(--dim);
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.context-metrics dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--cyan);
+  font-size: 9px;
+}
+
+.context-notice,
+.context-limitations {
+  margin: 0;
+  padding: 9px;
+  border: 1px solid #69592f;
+  background: #1b1810;
+  color: var(--amber);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.context-limitations h3 {
+  margin-top: 0;
+  color: var(--amber);
+}
+
+.context-limitations ul {
+  margin: 0;
+  padding-left: 17px;
+}
+
+.context-items,
+.context-ancestry ul,
+.context-ancestry ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-items > li {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+}
+
+.context-items header,
+.context-items footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 8px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.context-items header {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.context-items header span {
+  color: var(--amber);
+}
+
+.context-items header strong {
+  color: var(--ink);
+}
+
+.context-items header em {
+  color: var(--violet);
+  font-style: normal;
+}
+
+.context-items header small {
+  margin-left: auto;
+}
+
+.context-items .json-block {
+  border: 0;
+}
+
+.context-items footer {
+  display: grid;
+  border-top: 1px solid var(--line-soft);
+  color: var(--dim);
+}
+
+.context-items footer code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-provenance-link {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.context-provenance-link:hover,
+.context-provenance-link:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.context-ancestry {
+  display: grid;
+  gap: 7px;
+  font-size: 8px;
+}
+
+.context-ancestry li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  padding: 7px;
+  border: 1px solid var(--line-soft);
+  background: #0d1213;
+}
+
+.context-ancestry code {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-ancestry ol span {
+  color: var(--amber);
+}
+
 .related-events {
   display: grid;
   gap: 5px;

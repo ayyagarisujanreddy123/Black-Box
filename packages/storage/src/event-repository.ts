@@ -269,6 +269,40 @@ export class EventRepository {
     };
   }
 
+  listForExchange(exchangeId: string): BlackBoxEvent[] {
+    const rows = this.database
+      .prepare(
+        `SELECT record_json
+         FROM events
+         WHERE raw_exchange_id = ?
+         ORDER BY sequence ASC, id ASC`,
+      )
+      .all(exchangeId) as EventRow[];
+    return rows.map(parseEventRow);
+  }
+
+  findResponseEvent(
+    sessionId: string,
+    responseId: string,
+  ): BlackBoxEvent | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT record_json
+         FROM events
+         WHERE session_id = ?
+           AND raw_exchange_id IS NOT NULL
+           AND type IN ('model.response.completed', 'model.response.started')
+           AND json_extract(summary_json, '$.responseId') = ?
+         ORDER BY
+           CASE type WHEN 'model.response.completed' THEN 0 ELSE 1 END,
+           sequence ASC,
+           id ASC
+         LIMIT 1`,
+      )
+      .get(sessionId, responseId) as EventRow | undefined;
+    return row === undefined ? undefined : parseEventRow(row);
+  }
+
   getNormalization(
     exchangeId: string,
     parserVersion: string,

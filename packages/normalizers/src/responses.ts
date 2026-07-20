@@ -12,7 +12,7 @@ import { SseReplayDetector } from "./duplicates.js";
 import { materializeCanonicalEvents } from "./events.js";
 import { decodeSseChunks, type SseFrame } from "./sse.js";
 
-export const RESPONSES_NORMALIZER_VERSION = "1.0.0";
+export const RESPONSES_NORMALIZER_VERSION = "1.1.0";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -184,6 +184,36 @@ function requestToolResultDrafts(request: JsonRecord | undefined) {
   return drafts;
 }
 
+function requestEvidenceDrafts(
+  exchange: NormalizationExchange,
+  request: JsonRecord | undefined,
+  options: NormalizationOptions,
+): CanonicalEventDraft[] {
+  const previousResponseId = stringValue(request?.previous_response_id);
+  const summary =
+    previousResponseId === undefined
+      ? {
+          endpoint: exchange.path,
+          ...(stringValue(request?.model) === undefined
+            ? {}
+            : { model: stringValue(request?.model) }),
+        }
+      : {
+          previousResponseId,
+          contextCompleteness:
+            options.knownResponseIds?.has(previousResponseId) === true
+              ? "complete-client-chain"
+              : "partial-client-chain",
+          ...(options.knownResponseIds?.has(previousResponseId) === true
+            ? {}
+            : { missingAncestorIds: [previousResponseId] }),
+        };
+  return [
+    ...requestToolResultDrafts(request),
+    { type: "model.request", summary },
+  ];
+}
+
 function outputItemDrafts(
   output: readonly unknown[],
   diagnostics: ParserDiagnostic[],
@@ -308,7 +338,7 @@ function normalizeJson(
     );
   }
 
-  const drafts: CanonicalEventDraft[] = [];
+  const drafts = requestEvidenceDrafts(exchange, request, options);
   if (response === undefined) {
     drafts.push(parserErrorDraft(parserId));
   } else {
@@ -316,33 +346,8 @@ function normalizeJson(
     if (apiError !== undefined) {
       drafts.push(apiError);
     } else {
-      drafts.push(...requestToolResultDrafts(request));
       const output = Array.isArray(response.output) ? response.output : [];
       const previousResponseId = stringValue(request?.previous_response_id);
-      if (previousResponseId !== undefined) {
-        const known =
-          options.knownResponseIds?.has(previousResponseId) === true;
-        drafts.push({
-          type: "model.request",
-          summary: {
-            previousResponseId,
-            contextCompleteness: known
-              ? "complete-client-chain"
-              : "partial-client-chain",
-            ...(known ? {} : { missingAncestorIds: [previousResponseId] }),
-          },
-        });
-      } else if (output.length > 0) {
-        drafts.push({
-          type: "model.request",
-          summary: {
-            endpoint: exchange.path,
-            ...(stringValue(request?.model) === undefined
-              ? {}
-              : { model: stringValue(request?.model) }),
-          },
-        });
-      }
       drafts.push(...outputItemDrafts(output, diagnostics));
 
       const usage = reportedUsage(response.usage);
@@ -481,6 +486,8 @@ function normalizeSse(
   const started: CanonicalEventDraft[] = [];
   const terminal: CanonicalEventDraft[] = [];
   const unknown: CanonicalEventDraft[] = [];
+  const request = requestObject(exchange, diagnostics);
+  const requestEvidence = requestEvidenceDrafts(exchange, request, options);
   const texts = new Map<string, string>();
   const functions = new Map<string, FunctionAssembly>();
   let usage: ReportedUsage | undefined;
@@ -777,6 +784,7 @@ function normalizeSse(
   const hasParserErrors = parserErrors.length > 0;
   const drafts = hasParserErrors
     ? [
+        ...requestEvidence,
         ...parserErrors,
         ...duplicateErrors,
         ...semantic.filter(
@@ -785,7 +793,7 @@ function normalizeSse(
             draft.type === "transport.error",
         ),
       ]
-    : [...duplicateErrors, ...semantic];
+    : [...requestEvidence, ...duplicateErrors, ...semantic];
   return NormalizationResultSchema.parse({
     parserId,
     parserVersion: RESPONSES_NORMALIZER_VERSION,

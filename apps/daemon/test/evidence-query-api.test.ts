@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
   BlackBoxEventSchema,
+  RawExchangeSchema,
   SessionSchema,
   type BlackBoxEvent,
   type BlobReference,
@@ -222,6 +223,55 @@ describe("authenticated evidence query API", () => {
         },
       }),
     );
+    const requestBodyRef = await storage.blobs.put(
+      Buffer.from(
+        JSON.stringify({
+          model: "gpt-5.2",
+          messages: [{ role: "user", content: "What changed?" }],
+        }),
+        "utf8",
+      ),
+      { mediaType: "application/json" },
+    );
+    storage.rawExchanges.insertComplete(
+      RawExchangeSchema.parse({
+        schemaVersion: 1,
+        id: "exchange-context-api",
+        sessionId: "session-query",
+        sequence: 3,
+        protocol: "openai.chat-completions",
+        method: "POST",
+        path: "/v1/chat/completions",
+        query: {},
+        requestHeaders: { "content-type": ["application/json"] },
+        requestBodyRef,
+        responseStatus: 200,
+        responseHeaders: { "content-type": ["application/json"] },
+        startedAt: TIME,
+        endedAt: LATER,
+        outcome: "completed",
+        parseStatus: "pending",
+        capture: {
+          requestComplete: true,
+          responseComplete: true,
+          droppedRequestBytes: 0,
+          droppedResponseBytes: 0,
+        },
+      }),
+    );
+    storage.events.insertNormalization({
+      exchangeId: "exchange-context-api",
+      parserVersion: "context-api-test-v1",
+      events: [
+        event({
+          id: "event-context-request",
+          sequence: 3,
+          source: "proxy",
+          type: "model.request",
+          summary: { endpoint: "/v1/chat/completions" },
+        }),
+      ],
+    });
     const origin = await startControl(storage);
 
     expect(
@@ -274,6 +324,26 @@ describe("authenticated evidence query API", () => {
       event: { id: "event-file" },
       fileChange: { path: "README.md", operation: "modify" },
     });
+    const context = await get(
+      origin,
+      "/v1/events/event-context-request/context",
+    );
+    expect(context.status).toBe(200);
+    expect(json(context)).toMatchObject({
+      requestEventId: "event-context-request",
+      completeness: "exact-client-request",
+      items: [{ kind: "message", role: "user" }, { kind: "settings" }],
+    });
+    expect(
+      (
+        await get(origin, "/v1/events/event-context-request/context", {
+          authenticated: false,
+        })
+      ).status,
+    ).toBe(401);
+    expect((await get(origin, "/v1/events/event-file/context")).status).toBe(
+      400,
+    );
     expect(
       json(
         await get(

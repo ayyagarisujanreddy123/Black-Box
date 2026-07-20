@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect } from "node:net";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -14,6 +14,7 @@ import {
   DaemonAlreadyRunningError,
   DaemonLock,
   UnsafeControlBindError,
+  ViewerAssets,
   ensureControlToken,
   readControlToken,
   readDaemonLockRecord,
@@ -351,6 +352,89 @@ describe("authenticated loopback control API", () => {
           shutdown: () => undefined,
         }),
     ).toThrow(UnsafeControlBindError);
+  });
+
+  it("serves only the packaged viewer shell without weakening API authentication", async () => {
+    const directory = await temporaryRoot();
+    await mkdir(join(directory, "assets"));
+    await writeFile(
+      join(directory, "index.html"),
+      '<!doctype html><div id="root"></div>',
+    );
+    await writeFile(join(directory, "assets", "viewer.js"), "export {};\n");
+    await writeFile(
+      join(directory, "assets", "viewer.css"),
+      "body { color: white; }\n",
+    );
+    const token = "v".repeat(43);
+    const control = new ControlServer({
+      token,
+      listenPort: 0,
+      status: fixtureStatus,
+      shutdown: () => undefined,
+      viewerAssets: await ViewerAssets.load(directory),
+    });
+    const address = await control.start();
+
+    const index = await controlRequest(address.origin, "/");
+    expect(index).toMatchObject({
+      status: 200,
+      body: '<!doctype html><div id="root"></div>',
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "text/html; charset=utf-8",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+      },
+    });
+    expect(index.headers["content-security-policy"]).toContain(
+      "default-src 'none'",
+    );
+    expect(index.headers["content-security-policy"]).toContain(
+      "connect-src 'self'",
+    );
+
+    const script = await controlRequest(address.origin, "/assets/viewer.js", {
+      origin: address.origin,
+    });
+    expect(script).toMatchObject({
+      status: 200,
+      body: "export {};\n",
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": "text/javascript; charset=utf-8",
+      },
+    });
+    expect(
+      (
+        await controlRequest(address.origin, "/assets/missing.js", {
+          token,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await controlRequest(address.origin, "/", {
+          origin: "https://attacker.example",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await controlRequest(address.origin, "/", { method: "POST" })).headers
+        .allow,
+    ).toBe("GET, HEAD");
+    expect(
+      (await controlRequest(address.origin, "/v1/control/status")).status,
+    ).toBe(401);
+    expect(
+      (
+        await controlRequest(address.origin, "/v1/control/status", {
+          token,
+        })
+      ).status,
+    ).toBe(200);
+
+    await control.close();
   });
 });
 

@@ -79,7 +79,14 @@ describe("golden protocol fixtures", () => {
 
   it("uses unknown rather than zero when usage is absent", () => {
     const fixture = getProtocolFixture("usage-absent");
-    const event = BlackBoxEventSchema.parse(fixture.expectedCanonicalEvents[0]);
+    const event = BlackBoxEventSchema.parse(
+      fixture.expectedCanonicalEvents.find((candidate) => {
+        const parsed = BlackBoxEventSchema.safeParse(candidate);
+        return (
+          parsed.success && parsed.data.type === "model.response.completed"
+        );
+      }),
+    );
 
     expect(event.summary).toMatchObject({
       usage: "unknown",

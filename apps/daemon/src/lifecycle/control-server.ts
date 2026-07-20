@@ -16,6 +16,7 @@ import { sendJson } from "../query/http-response.js";
 import type { LiveEventStreamConfiguration } from "../query/live-event-stream.js";
 import { ControlTokenSchema } from "./control-token.js";
 import type { DaemonStatus } from "./status.js";
+import type { ViewerAssets } from "../viewer/viewer-assets.js";
 
 const ControlPortSchema = z.number().int().min(0).max(65_535);
 
@@ -29,6 +30,7 @@ export interface ControlServerOptions {
   readonly query?: EvidenceQueryService;
   readonly maximumQueryPayloadBytes?: number;
   readonly liveQuery?: LiveEventStreamConfiguration;
+  readonly viewerAssets?: ViewerAssets;
 }
 
 export interface ControlAddress {
@@ -223,16 +225,6 @@ export class ControlServer {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    if (!tokenMatches(request.headers.authorization, this.options.token)) {
-      request.resume();
-      sendJson(
-        response,
-        401,
-        { error: "unauthorized" },
-        { "www-authenticate": "Bearer" },
-      );
-      return;
-    }
     if (
       !this.requestHostIsSafe(request) ||
       !this.requestOriginIsSafe(request)
@@ -243,6 +235,19 @@ export class ControlServer {
     }
 
     const url = new URL(request.url ?? "/", "http://blackbox.invalid");
+    if (this.options.viewerAssets?.handle(request, response, url) === true) {
+      return;
+    }
+    if (!tokenMatches(request.headers.authorization, this.options.token)) {
+      request.resume();
+      sendJson(
+        response,
+        401,
+        { error: "unauthorized" },
+        { "www-authenticate": "Bearer" },
+      );
+      return;
+    }
     const path = url.pathname;
     if (
       this.queryRouter !== undefined &&

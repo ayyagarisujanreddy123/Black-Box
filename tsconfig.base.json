@@ -17,6 +17,7 @@
     "noUncheckedIndexedAccess": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
+      "@blackbox/context": ["./packages/context/src/index.ts"],
       "@blackbox/daemon": ["./apps/daemon/src/index.ts"],
       "@blackbox/normalizers": ["./packages/normalizers/src/index.ts"],
       "@blackbox/test-fixtures": ["./packages/test-fixtures/src/index.ts"],

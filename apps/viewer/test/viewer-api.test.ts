@@ -1,4 +1,9 @@
-import { BlackBoxEventSchema, LiveEventReadySchema } from "@blackbox/protocol";
+import {
+  BlackBoxEventSchema,
+  ContextResultSchema,
+  CONTEXT_VISIBILITY_NOTICE,
+  LiveEventReadySchema,
+} from "@blackbox/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -92,6 +97,53 @@ describe("viewer API transport", () => {
       "http://127.0.0.1:4142/v1/sessions?limit=25",
     );
     expect(observations[0]?.url).not.toContain(token);
+    expect(observations[0]?.headers.get("authorization")).toBe(
+      `Bearer ${token}`,
+    );
+  });
+
+  it("loads and validates context through the authenticated event route", async () => {
+    const context = ContextResultSchema.parse({
+      schemaVersion: 1,
+      requestEventId: "event-context",
+      completeness: "exact-client-request",
+      items: [],
+      ancestry: {
+        nodes: [
+          {
+            id: "event-context",
+            kind: "request",
+            locallyAvailable: true,
+          },
+        ],
+        edges: [],
+      },
+      reportedInputTokens: 7,
+      estimatedInputTokens: 8,
+      modelContextLimit: null,
+      limitationReasons: [],
+      visibilityNotice: CONTEXT_VISIBILITY_NOTICE,
+    });
+    const observations: Array<{ url: string; headers: Headers }> = [];
+    const fetcher: typeof fetch = (input, init) => {
+      observations.push({
+        url: String(input),
+        headers: new Headers(init?.headers),
+      });
+      return Promise.resolve(
+        new Response(JSON.stringify(context), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const token = "f".repeat(43);
+    const api = new ViewerApiClient("http://127.0.0.1:4142", token, fetcher);
+
+    await expect(api.getContext("event-context")).resolves.toEqual(context);
+    expect(observations[0]?.url).toBe(
+      "http://127.0.0.1:4142/v1/events/event-context/context",
+    );
     expect(observations[0]?.headers.get("authorization")).toBe(
       `Bearer ${token}`,
     );

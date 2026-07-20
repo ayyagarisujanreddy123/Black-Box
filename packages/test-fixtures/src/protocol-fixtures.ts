@@ -313,24 +313,28 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: responsesSseBody,
     outcome: "completed",
     expectedCanonicalEvents: [
-      event("responses-sse-text-function", 1, "model.response.started", {
+      event("responses-sse-text-function", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "gpt-5.2",
+      }),
+      event("responses-sse-text-function", 2, "model.response.started", {
         responseId: "resp_stream",
       }),
-      event("responses-sse-text-function", 2, "message.assistant", {
+      event("responses-sse-text-function", 3, "message.assistant", {
         messageId: "msg_stream",
         text: "I will check.",
       }),
-      event("responses-sse-text-function", 3, "tool.call", {
+      event("responses-sse-text-function", 4, "tool.call", {
         callId: "call_stream",
         name: "read_file",
         arguments: { path: "README.md" },
       }),
-      event("responses-sse-text-function", 4, "model.usage", {
+      event("responses-sse-text-function", 5, "model.usage", {
         inputTokens: 18,
         outputTokens: 11,
         totalTokens: 29,
       }),
-      event("responses-sse-text-function", 5, "model.response.completed", {
+      event("responses-sse-text-function", 6, "model.response.completed", {
         responseId: "resp_stream",
         status: "completed",
       }),
@@ -383,20 +387,24 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: chatSseBody,
     outcome: "completed",
     expectedCanonicalEvents: [
-      event("chat-sse-content-tools", 1, "message.assistant", {
+      event("chat-sse-content-tools", 1, "model.request", {
+        endpoint: "/v1/chat/completions",
+        model: "gpt-5.2",
+      }),
+      event("chat-sse-content-tools", 2, "message.assistant", {
         text: "I will inspect it.",
       }),
-      event("chat-sse-content-tools", 2, "tool.call", {
+      event("chat-sse-content-tools", 3, "tool.call", {
         callId: "tool_1",
         name: "read_file",
         arguments: { path: "README.md" },
       }),
-      event("chat-sse-content-tools", 3, "model.usage", {
+      event("chat-sse-content-tools", 4, "model.usage", {
         inputTokens: 21,
         outputTokens: 12,
         totalTokens: 33,
       }),
-      event("chat-sse-content-tools", 4, "model.response.completed", {
+      event("chat-sse-content-tools", 5, "model.response.completed", {
         responseId: "chatcmpl_stream",
         finishReason: "tool_calls",
       }),
@@ -416,7 +424,11 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: errorResponse,
     outcome: "completed",
     expectedCanonicalEvents: [
-      event("http-4xx-error", 1, "api.error", {
+      event("http-4xx-error", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "missing-model",
+      }),
+      event("http-4xx-error", 2, "api.error", {
         status: 404,
         type: "invalid_request_error",
         code: "model_not_found",
@@ -438,12 +450,16 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: disconnectBody,
     outcome: "upstream-disconnected",
     expectedCanonicalEvents: [
-      event("mid-stream-disconnect", 1, "model.response.started", {
+      event("mid-stream-disconnect", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "gpt-5.2",
+      }),
+      event("mid-stream-disconnect", 2, "model.response.started", {
         responseId: "resp_disconnect",
       }),
       event(
         "mid-stream-disconnect",
-        2,
+        3,
         "transport.error",
         {
           outcome: "upstream-disconnected",
@@ -468,14 +484,18 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: malformedBody,
     outcome: "completed",
     expectedCanonicalEvents: [
+      event("malformed-sse-line", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "gpt-5.2",
+      }),
       event(
         "malformed-sse-line",
-        1,
+        2,
         "parser.error",
         { parser: "openai.responses.sse", frameIndex: 2 },
         { evidence: "derived" },
       ),
-      event("malformed-sse-line", 2, "model.response.completed", {
+      event("malformed-sse-line", 3, "model.response.completed", {
         responseId: "resp_malformed",
         status: "completed",
       }),
@@ -522,7 +542,11 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: usagePresentResponse,
     outcome: "completed",
     expectedCanonicalEvents: [
-      event("usage-present", 1, "model.usage", {
+      event("usage-present", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "gpt-5.2",
+      }),
+      event("usage-present", 2, "model.usage", {
         status: "reported",
         inputTokens: 5,
         outputTokens: 1,
@@ -544,7 +568,11 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
     expectedResponse: usageAbsentResponse,
     outcome: "completed",
     expectedCanonicalEvents: [
-      event("usage-absent", 1, "model.response.completed", {
+      event("usage-absent", 1, "model.request", {
+        endpoint: "/v1/responses",
+        model: "gpt-5.2",
+      }),
+      event("usage-absent", 2, "model.response.completed", {
         responseId: "resp_no_usage",
         usage: "unknown",
         inputTokens: null,

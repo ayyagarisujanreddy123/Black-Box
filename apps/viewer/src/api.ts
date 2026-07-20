@@ -1,5 +1,6 @@
 import {
   BlackBoxEventSchema,
+  ContextResultSchema,
   EventDetailSchema,
   EventPageSchema,
   EventSearchResultSchema,
@@ -8,6 +9,7 @@ import {
   SessionDetailSchema,
   SessionPageSchema,
   type BlackBoxEvent,
+  type ContextResult,
   type EventDetail,
   type EventPage,
   type EventSearchResult,
@@ -174,6 +176,13 @@ export class ViewerApiClient {
     return this.getJson(
       `/v1/events/${encodeURIComponent(eventId)}`,
       EventDetailSchema,
+    );
+  }
+
+  getContext(eventId: string): Promise<ContextResult> {
+    return this.getJson(
+      `/v1/events/${encodeURIComponent(eventId)}/context`,
+      ContextResultSchema,
     );
   }
 

@@ -298,6 +298,11 @@ export class EvidenceQueryRouter {
           sendJson(response, 200, await this.options.query.getContext(eventId));
           return true;
         }
+        if (encodedSegments.length === 4 && encodedSegments[3] === "blame") {
+          assertAllowedParameters(url, new Set());
+          sendJson(response, 200, await this.options.query.getBlame(eventId));
+          return true;
+        }
         return false;
       }
       if (route === "payloads" && encodedSegments.length === 3) {

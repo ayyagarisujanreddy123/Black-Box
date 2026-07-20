@@ -176,6 +176,79 @@ export class AnalysisRunRepository {
       ? undefined
       : AnalysisRunRecordSchema.parse(JSON.parse(row.record_json));
   }
+
+  findCompleted(
+    sessionId: string,
+    kind: AnalysisRunRecord["kind"],
+    targetEventId: string,
+    analyzer: string,
+  ): AnalysisRunRecord | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT record_json
+         FROM analysis_runs
+         WHERE session_id = ?
+           AND kind = ?
+           AND target_event_id = ?
+           AND analyzer = ?
+           AND status = 'completed'
+           AND result_blob_id IS NOT NULL
+         ORDER BY ended_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(sessionId, kind, targetEventId, analyzer) as
+      RecordJsonRow | undefined;
+    return row === undefined
+      ? undefined
+      : AnalysisRunRecordSchema.parse(JSON.parse(row.record_json));
+  }
+
+  insertIfAbsent(input: AnalysisRunRecord): {
+    readonly record: AnalysisRunRecord;
+    readonly inserted: boolean;
+  } {
+    const record = AnalysisRunRecordSchema.parse(input);
+    const result = this.database
+      .prepare(
+        `INSERT OR IGNORE INTO analysis_runs(
+           id, session_id, schema_version, kind, target_event_id, status,
+           analyzer, prompt_version, started_at, ended_at, result_blob_id,
+           error, record_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.sessionId,
+        record.schemaVersion,
+        record.kind,
+        record.targetEventId ?? null,
+        record.status,
+        record.analyzer,
+        record.promptVersion ?? null,
+        record.startedAt,
+        record.endedAt ?? null,
+        record.resultBlobId ?? null,
+        record.error ?? null,
+        JSON.stringify(record),
+      );
+    const stored = this.get(record.id);
+    if (stored === undefined) {
+      throw new ImmutableEvidenceError(
+        `Analysis run ${record.id} was not stored.`,
+      );
+    }
+    if (
+      stored.sessionId !== record.sessionId ||
+      stored.kind !== record.kind ||
+      stored.targetEventId !== record.targetEventId ||
+      stored.analyzer !== record.analyzer
+    ) {
+      throw new ImmutableEvidenceError(
+        `Analysis run ${record.id} conflicts with existing evidence.`,
+      );
+    }
+    return { record: stored, inserted: result.changes === 1 };
+  }
 }
 
 export class RedactionRepository {

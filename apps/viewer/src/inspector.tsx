@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import type {
   BlackBoxEvent,
+  BlameAnalysis,
+  BlameCandidate,
   BlobReference,
   ContextCompleteness,
   ContextResult,
@@ -17,6 +19,7 @@ import {
 
 type InspectorTab =
   | "summary"
+  | "blame"
   | "context"
   | "normalized"
   | "raw"
@@ -204,6 +207,314 @@ export function ContextPanel(props: {
     return <p className="inspector-note">Reconstructing visible context…</p>;
   }
   return <ContextView context={context} onSelectEvent={props.onSelectEvent} />;
+}
+
+function EventLink(props: {
+  readonly eventId: string;
+  readonly label?: string;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="context-provenance-link"
+      onClick={() => props.onSelectEvent(props.eventId)}
+    >
+      {props.label ?? props.eventId}
+    </button>
+  );
+}
+
+const FEATURE_LABELS: Readonly<Record<string, string>> = {
+  provenance: "provenance",
+  bm25Match: "BM25 / FTS",
+  lexicalOverlap: "lexical overlap",
+  lexicalOrSemanticSimilarity: "combined lexical",
+  entityPathOverlap: "path / entity",
+  intentConflict: "intent conflict",
+  instructionLikelihood: "instruction-like",
+  recencyDecay: "recency",
+  propagationDepth: "propagation depth",
+};
+
+function CandidateFeatures(props: {
+  readonly candidate: BlameCandidate;
+}): React.JSX.Element {
+  return (
+    <dl className="blame-features">
+      {Object.entries(props.candidate.features).map(([name, value]) => (
+        <div key={name}>
+          <dt>{FEATURE_LABELS[name] ?? name}</dt>
+          <dd>
+            <span
+              style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%` }}
+            />
+            <code>{value.toFixed(2)}</code>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function BlameView(props: {
+  readonly analysis: BlameAnalysis;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  const { blame, anomalies } = props.analysis;
+  return (
+    <div className="blame-view">
+      <section className={`blame-verdict confidence-${blame.confidence}`}>
+        <header>
+          <span>Deterministic attribution</span>
+          <strong>{blame.confidence} confidence</strong>
+        </header>
+        <p>{blame.conclusion}</p>
+        <dl>
+          <div>
+            <dt>target</dt>
+            <dd>
+              {blame.target.path ?? blame.target.entity ?? blame.target.verb}
+            </dd>
+          </div>
+          <div>
+            <dt>action</dt>
+            <dd>{blame.target.verb}</dd>
+          </div>
+          <div>
+            <dt>context</dt>
+            <dd>{CONTEXT_LABELS[blame.contextCompleteness]}</dd>
+          </div>
+          <div>
+            <dt>scoring</dt>
+            <dd>{blame.scoringVersion}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section>
+        <h3>Why this confidence</h3>
+        <ul className="blame-reasons">
+          {blame.confidenceReasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      </section>
+
+      {blame.primaryOrigin === undefined ? null : (
+        <section>
+          <h3>Primary origin</h3>
+          <article className="blame-origin">
+            <header>
+              <EventLink
+                eventId={blame.primaryOrigin.eventId}
+                onSelectEvent={props.onSelectEvent}
+              />
+              {blame.primaryOrigin.location === undefined ? null : (
+                <code>
+                  {blame.primaryOrigin.location.path}:
+                  {blame.primaryOrigin.location.startLine}
+                </code>
+              )}
+            </header>
+            <blockquote data-render-policy="inert-text-only">
+              {blame.primaryOrigin.excerpt}
+            </blockquote>
+          </article>
+        </section>
+      )}
+
+      <section>
+        <h3>Ranked candidates</h3>
+        {blame.candidates.length === 0 ? (
+          <p className="inspector-note">No eligible preceding evidence.</p>
+        ) : (
+          <ol className="blame-candidates">
+            {blame.candidates.slice(0, 8).map((candidate, index) => (
+              <li key={candidate.eventId}>
+                <header>
+                  <span>#{index + 1}</span>
+                  <EventLink
+                    eventId={candidate.eventId}
+                    onSelectEvent={props.onSelectEvent}
+                  />
+                  <strong>{candidate.score.toFixed(3)}</strong>
+                  {candidate.hardProvenanceEdge ? <em>hard edge</em> : null}
+                </header>
+                <CandidateFeatures candidate={candidate} />
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section>
+        <h3>Evidence propagation</h3>
+        {blame.propagation.length === 0 ? (
+          <p className="inspector-note">No hard propagation path recovered.</p>
+        ) : (
+          <ol className="blame-graph">
+            {blame.propagation.map((edge, index) => (
+              <li key={`${edge.from}-${edge.to}-${edge.relation}-${index}`}>
+                <EventLink
+                  eventId={edge.from}
+                  label={edge.from}
+                  onSelectEvent={props.onSelectEvent}
+                />
+                <span>{edge.relation}</span>
+                <EventLink
+                  eventId={edge.to}
+                  label={edge.to}
+                  onSelectEvent={props.onSelectEvent}
+                />
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section>
+        <h3>Anomaly signals</h3>
+        {anomalies.findings.length === 0 ? (
+          <p className="inspector-note">
+            No configured deterministic anomaly rule fired.
+          </p>
+        ) : (
+          <ul className="anomaly-findings">
+            {anomalies.findings.map((finding) => (
+              <li className={`severity-${finding.severity}`} key={finding.id}>
+                <header>
+                  <span>{finding.severity}</span>
+                  <code>{finding.ruleId}</code>
+                </header>
+                <strong>{finding.title}</strong>
+                <p>{finding.explanation}</p>
+                <footer>
+                  {finding.eventIds.map((eventId) => (
+                    <EventLink
+                      key={eventId}
+                      eventId={eventId}
+                      onSelectEvent={props.onSelectEvent}
+                    />
+                  ))}
+                </footer>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="blame-support">
+        <h3>Supporting evidence</h3>
+        {blame.evidence.length === 0 ? (
+          <p className="inspector-note">No additional supporting edge.</p>
+        ) : (
+          <ul>
+            {blame.evidence.map((item, index) => (
+              <li key={`${item.eventId}-${index}`}>
+                <EventLink
+                  eventId={item.eventId}
+                  onSelectEvent={props.onSelectEvent}
+                />
+                <span>{item.supports}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <h3>Counterevidence</h3>
+        {blame.counterevidence.length === 0 ? (
+          <p className="inspector-note">No explicit counterevidence ranked.</p>
+        ) : (
+          <ul>
+            {blame.counterevidence.map((item, index) => (
+              <li key={`${item.eventId}-${index}`}>
+                <EventLink
+                  eventId={item.eventId}
+                  onSelectEvent={props.onSelectEvent}
+                />
+                <span>{item.weakens}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <h3>Alternatives</h3>
+        <ul className="blame-alternatives">
+          {blame.alternatives.map((alternative) => (
+            <li key={alternative.explanation}>
+              <span>{alternative.explanation}</span>
+              <footer>
+                {alternative.evidenceIds.map((eventId) => (
+                  <EventLink
+                    key={eventId}
+                    eventId={eventId}
+                    onSelectEvent={props.onSelectEvent}
+                  />
+                ))}
+              </footer>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="blame-limitations">
+        <h3>Limitations</h3>
+        <ul>
+          {[...blame.limitations, ...anomalies.limitations].map(
+            (limitation) => (
+              <li key={limitation}>{limitation}</li>
+            ),
+          )}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+export function BlamePanel(props: {
+  readonly api: ViewerApiClient;
+  readonly eventId: string;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  const [analysis, setAnalysis] = useState<BlameAnalysis>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    let current = true;
+    setAnalysis(undefined);
+    setError(undefined);
+    void props.api
+      .getBlame(props.eventId)
+      .then((result) => current && setAnalysis(result))
+      .catch((cause: unknown) => {
+        if (current) {
+          setError(
+            cause instanceof Error ? cause.message : "Blame unavailable",
+          );
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [props.api, props.eventId]);
+
+  if (error !== undefined) {
+    return <p className="error-banner">{error}</p>;
+  }
+  if (analysis === undefined) {
+    return <p className="inspector-note">Ranking preceding evidence…</p>;
+  }
+  return <BlameView analysis={analysis} onSelectEvent={props.onSelectEvent} />;
+}
+
+export function blameAvailable(event: BlackBoxEvent): boolean {
+  return (
+    event.type === "tool.call" ||
+    event.type.startsWith("file.") ||
+    typeof event.summary.operation === "string"
+  );
 }
 
 function payloadChoices(detail: EventDetail): PayloadChoice[] {
@@ -542,6 +853,9 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
   const detail = props.detail;
   const tabs: InspectorTab[] = [
     "summary",
+    ...(detail !== undefined && blameAvailable(detail.event)
+      ? (["blame"] as const)
+      : []),
     ...(detail?.event.type === "model.request" ? (["context"] as const) : []),
     "normalized",
     "raw",
@@ -596,6 +910,13 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
       </div>
       <div className="inspector-panel" role="tabpanel">
         {tab === "summary" ? <Summary detail={detail} /> : null}
+        {tab === "blame" ? (
+          <BlamePanel
+            api={props.api}
+            eventId={detail.event.id}
+            onSelectEvent={props.onSelectEvent}
+          />
+        ) : null}
         {tab === "context" ? (
           <ContextPanel
             api={props.api}

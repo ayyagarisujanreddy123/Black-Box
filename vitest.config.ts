@@ -5,6 +5,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@blackbox/analysis": fileURLToPath(
+        new URL("./packages/analysis/src/index.ts", import.meta.url),
+      ),
       "@blackbox/context": fileURLToPath(
         new URL("./packages/context/src/index.ts", import.meta.url),
       ),

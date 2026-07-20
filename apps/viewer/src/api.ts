@@ -1,5 +1,6 @@
 import {
   BlackBoxEventSchema,
+  BlameAnalysisSchema,
   ContextResultSchema,
   EventDetailSchema,
   EventPageSchema,
@@ -9,6 +10,7 @@ import {
   SessionDetailSchema,
   SessionPageSchema,
   type BlackBoxEvent,
+  type BlameAnalysis,
   type ContextResult,
   type EventDetail,
   type EventPage,
@@ -183,6 +185,13 @@ export class ViewerApiClient {
     return this.getJson(
       `/v1/events/${encodeURIComponent(eventId)}/context`,
       ContextResultSchema,
+    );
+  }
+
+  getBlame(eventId: string): Promise<BlameAnalysis> {
+    return this.getJson(
+      `/v1/events/${encodeURIComponent(eventId)}/blame`,
+      BlameAnalysisSchema,
     );
   }
 

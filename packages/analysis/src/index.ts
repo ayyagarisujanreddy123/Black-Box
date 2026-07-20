@@ -1,4 +1,8 @@
+export * from "./anomaly-detector.js";
+export * from "./deterministic-blame.js";
+export * from "./types.js";
+
 export const analysisFoundation = {
-  milestone: 0,
-  status: "contracts-only",
+  milestone: 7,
+  status: "deterministic-blame-and-anomalies",
 } as const;

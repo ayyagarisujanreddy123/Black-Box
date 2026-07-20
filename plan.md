@@ -1,6 +1,6 @@
 # Black Box Execution Plan
 
-Status: M0–M6 complete; M7 ready to execute
+Status: M0–M7 complete; M8 ready to execute
 
 Version: 0.1
 
@@ -264,6 +264,8 @@ Acceptance:
 Exit artifact: context inspector is credible under both complete and incomplete cases.
 
 ### M7 — Deterministic blame and anomalies
+
+Implementation status: Complete on 2026-07-20. The exit artifact is covered by deterministic ranking, confidence-cap, benign-control, future-evidence, anomaly-rule, seeded-incident, storage/cache, authenticated API, and inert viewer rendering tests.
 
 Goal: trace the demo deletion to evidence without requiring another model.
 

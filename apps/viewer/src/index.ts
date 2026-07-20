@@ -7,6 +7,6 @@ export * from "./timeline.js";
 export * from "./timeline-view.js";
 
 export const viewerFoundation = {
-  milestone: 5,
-  status: "cockpit-vertical-slice",
+  milestone: 7,
+  status: "evidence-blame-cockpit",
 } as const;

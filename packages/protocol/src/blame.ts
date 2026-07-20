@@ -10,6 +10,32 @@ import { ContextCompletenessSchema } from "./context.js";
 
 export const BlameConfidenceSchema = z.enum(["low", "medium", "high"]);
 
+export const AnomalySeveritySchema = z.enum(["low", "medium", "high"]);
+
+export const AnomalyFindingSchema = z
+  .object({
+    id: IdentifierSchema,
+    ruleId: IdentifierSchema,
+    severity: AnomalySeveritySchema,
+    title: z.string().trim().min(1),
+    explanation: z.string().trim().min(1),
+    eventIds: z.array(IdentifierSchema).min(1),
+    inputs: JsonObjectSchema,
+    threshold: JsonObjectSchema,
+  })
+  .strict();
+
+export const AnomalyResultSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    analyzerVersion: z.string().trim().min(1),
+    sessionId: IdentifierSchema,
+    targetEventId: IdentifierSchema,
+    findings: z.array(AnomalyFindingSchema),
+    limitations: z.array(z.string().trim().min(1)),
+  })
+  .strict();
+
 export const BlameTargetSchema = z
   .object({
     eventId: IdentifierSchema,
@@ -111,6 +137,27 @@ export const BlameResultSchema = z
     }
   });
 
+export const BlameAnalysisSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    blame: BlameResultSchema,
+    anomalies: AnomalyResultSchema,
+  })
+  .strict()
+  .superRefine((analysis, context) => {
+    if (analysis.blame.target.eventId !== analysis.anomalies.targetEventId) {
+      context.addIssue({
+        code: "custom",
+        message: "Blame and anomaly results must describe the same target",
+        path: ["anomalies", "targetEventId"],
+      });
+    }
+  });
+
+export type AnomalyFinding = z.infer<typeof AnomalyFindingSchema>;
+export type AnomalyResult = z.infer<typeof AnomalyResultSchema>;
+export type AnomalySeverity = z.infer<typeof AnomalySeveritySchema>;
+export type BlameAnalysis = z.infer<typeof BlameAnalysisSchema>;
 export type BlameCandidate = z.infer<typeof BlameCandidateSchema>;
 export type BlameConfidence = z.infer<typeof BlameConfidenceSchema>;
 export type BlameResult = z.infer<typeof BlameResultSchema>;

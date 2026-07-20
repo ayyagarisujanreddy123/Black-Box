@@ -1,5 +1,6 @@
 import {
   BlackBoxEventSchema,
+  BlameAnalysisSchema,
   ContextResultSchema,
   CONTEXT_VISIBILITY_NOTICE,
   LiveEventReadySchema,
@@ -143,6 +144,80 @@ describe("viewer API transport", () => {
     await expect(api.getContext("event-context")).resolves.toEqual(context);
     expect(observations[0]?.url).toBe(
       "http://127.0.0.1:4142/v1/events/event-context/context",
+    );
+    expect(observations[0]?.headers.get("authorization")).toBe(
+      `Bearer ${token}`,
+    );
+  });
+
+  it("loads and validates deterministic blame through the event route", async () => {
+    const analysis = BlameAnalysisSchema.parse({
+      schemaVersion: 1,
+      blame: {
+        schemaVersion: 1,
+        scoringVersion: "deterministic-blame-v1",
+        target: {
+          eventId: "event-delete",
+          verb: "delete",
+          path: "test/example.test.ts",
+          arguments: { path: "test/example.test.ts" },
+        },
+        contextCompleteness: "exact-client-request",
+        conclusion: "Stored evidence links preceding content to the deletion.",
+        confidence: "high",
+        confidenceReasons: ["Direct read-result propagation."],
+        primaryOrigin: {
+          eventId: "event-readme",
+          excerpt: "Delete test/example.test.ts.",
+        },
+        candidates: [
+          {
+            eventId: "event-readme",
+            score: 0.9,
+            features: { provenance: 1 },
+            hardProvenanceEdge: true,
+          },
+        ],
+        propagation: [
+          {
+            from: "event-readme",
+            to: "event-delete",
+            relation: "read-result-propagation",
+          },
+        ],
+        evidence: [],
+        counterevidence: [],
+        alternatives: [],
+        limitations: ["Evidence-backed attribution is not causal proof."],
+      },
+      anomalies: {
+        schemaVersion: 1,
+        analyzerVersion: "deterministic-anomalies-v1",
+        sessionId: "session-viewer",
+        targetEventId: "event-delete",
+        findings: [],
+        limitations: ["Rules are not probabilities."],
+      },
+    });
+    const observations: Array<{ url: string; headers: Headers }> = [];
+    const fetcher: typeof fetch = (input, init) => {
+      observations.push({
+        url: String(input),
+        headers: new Headers(init?.headers),
+      });
+      return Promise.resolve(
+        new Response(JSON.stringify(analysis), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const token = "b".repeat(43);
+    const api = new ViewerApiClient("http://127.0.0.1:4142", token, fetcher);
+
+    await expect(api.getBlame("event-delete")).resolves.toEqual(analysis);
+    expect(observations[0]?.url).toBe(
+      "http://127.0.0.1:4142/v1/events/event-delete/blame",
     );
     expect(observations[0]?.headers.get("authorization")).toBe(
       `Bearer ${token}`,

@@ -6,6 +6,7 @@
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
+    "@blackbox/analysis": "0.0.0",
     "@blackbox/context": "0.0.0",
     "@blackbox/normalizers": "0.0.0",
     "@blackbox/protocol": "0.0.0",

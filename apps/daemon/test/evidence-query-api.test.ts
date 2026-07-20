@@ -344,6 +344,23 @@ describe("authenticated evidence query API", () => {
     expect((await get(origin, "/v1/events/event-file/context")).status).toBe(
       400,
     );
+    const blame = await get(origin, "/v1/events/event-file/blame");
+    expect(blame.status).toBe(200);
+    expect(json(blame)).toMatchObject({
+      schemaVersion: 1,
+      blame: { target: { eventId: "event-file", verb: "modify" } },
+      anomalies: { targetEventId: "event-file" },
+    });
+    expect(
+      (
+        await get(origin, "/v1/events/event-file/blame", {
+          authenticated: false,
+        })
+      ).status,
+    ).toBe(401);
+    expect((await get(origin, "/v1/events/event-message/blame")).status).toBe(
+      400,
+    );
     expect(
       json(
         await get(

@@ -42,6 +42,11 @@ export interface EventCursorPage {
   readonly nextCursor?: string;
 }
 
+export interface EventAnalysisWindow {
+  readonly events: BlackBoxEvent[];
+  readonly truncated: boolean;
+}
+
 export interface EventListOptions {
   readonly cursor?: string;
   readonly limit?: number;
@@ -392,6 +397,37 @@ export class EventRepository {
       )
       .all(sessionId, afterSequence, limit) as EventRow[];
     return rows.map(parseEventRow);
+  }
+
+  listThroughSequence(
+    sessionId: string,
+    throughSequence: number,
+    limit = 5_000,
+  ): EventAnalysisWindow {
+    if (!Number.isSafeInteger(throughSequence) || throughSequence < 1) {
+      throw new RangeError(
+        "Analysis event sequence must be a positive integer.",
+      );
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
+      throw new RangeError(
+        "Analysis event window must contain between 1 and 10000 events.",
+      );
+    }
+    const rows = this.database
+      .prepare(
+        `SELECT record_json
+         FROM events
+         WHERE session_id = ? AND sequence <= ?
+         ORDER BY sequence DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(sessionId, throughSequence, limit + 1) as EventRow[];
+    const truncated = rows.length > limit;
+    const visible = (truncated ? rows.slice(0, limit) : rows)
+      .map(parseEventRow)
+      .reverse();
+    return { events: visible, truncated };
   }
 
   search(sessionId: string, query: string, limit = 50): BlackBoxEvent[] {

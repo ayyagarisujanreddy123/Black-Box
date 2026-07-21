@@ -3,6 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type {
+  AiReportProvider,
+  AiReportProviderRequest,
+} from "@blackbox/analysis";
 import {
   BlackBoxEventSchema,
   RawExchangeSchema,
@@ -12,7 +16,7 @@ import {
   type Session,
 } from "@blackbox/protocol";
 import { openBlackBoxStorage, type BlackBoxStorage } from "@blackbox/storage";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ControlServer,
@@ -121,13 +125,16 @@ async function testStorage(): Promise<BlackBoxStorage> {
 async function startControl(
   storage: BlackBoxStorage,
   maximumQueryPayloadBytes = 64 * 1024 * 1024,
+  aiReportProvider?: AiReportProvider,
 ): Promise<string> {
   const control = new ControlServer({
     token: TOKEN,
     listenPort: 0,
     status: fixtureStatus,
     shutdown: () => undefined,
-    query: new EvidenceQueryService(storage),
+    query: new EvidenceQueryService(storage, {
+      ...(aiReportProvider === undefined ? {} : { aiReportProvider }),
+    }),
     maximumQueryPayloadBytes,
   });
   controls.push(control);
@@ -141,9 +148,11 @@ async function get(
     readonly authenticated?: boolean;
     readonly method?: string;
     readonly origin?: string;
+    readonly body?: string;
   } = {},
 ): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
+    const body = options.body ?? "";
     const request = httpRequest(
       new URL(path, origin),
       {
@@ -153,7 +162,8 @@ async function get(
             ? {}
             : { authorization: `Bearer ${TOKEN}` }),
           ...(options.origin === undefined ? {} : { origin: options.origin }),
-          "content-length": 0,
+          ...(body.length === 0 ? {} : { "content-type": "application/json" }),
+          "content-length": Buffer.byteLength(body),
         },
       },
       (response) => {
@@ -171,12 +181,63 @@ async function get(
       },
     );
     request.on("error", reject);
-    request.end();
+    request.end(body);
   });
 }
 
 function json(result: HttpResult): unknown {
   return JSON.parse(result.body.toString("utf8"));
+}
+
+function reportProvider(): {
+  readonly provider: AiReportProvider;
+  readonly requests: AiReportProviderRequest[];
+} {
+  const requests: AiReportProviderRequest[] = [];
+  return {
+    requests,
+    provider: {
+      provider: "fixture-provider",
+      model: "fixture-model",
+      analyze: vi.fn(async (request: AiReportProviderRequest) => {
+        requests.push(request);
+        const snapshot = JSON.parse(request.evidenceSnapshot) as {
+          readonly categories: readonly {
+            readonly evidence: readonly {
+              readonly eventId: string;
+              readonly excerpt: string;
+            }[];
+          }[];
+        };
+        const evidence = snapshot.categories
+          .flatMap((category) => category.evidence)
+          .find((item) => item.eventId === "event-file");
+        if (evidence === undefined) {
+          throw new Error("Expected target evidence was not transmitted.");
+        }
+        const citation = {
+          eventId: evidence.eventId,
+          excerpt: evidence.excerpt,
+        };
+        return {
+          output: {
+            schemaVersion: 1,
+            impact: { statement: "README.md changed.", citations: [citation] },
+            rootCauseHypothesis: {
+              statement: "The recorded action may explain the change.",
+              confidence: "low",
+              citations: [citation],
+            },
+            contributingConditions: [],
+            counterevidence: [],
+            alternatives: [],
+            preventionActions: [],
+            limitations: [],
+          },
+        };
+      }),
+    },
+  };
 }
 
 afterEach(async () => {
@@ -372,6 +433,132 @@ describe("authenticated evidence query API", () => {
       query: "needle response",
       events: [{ id: "event-message" }],
     });
+  });
+
+  it("requires authenticated explicit consent for optional AI reports", async () => {
+    const storage = await testStorage();
+    storage.sessions.create(session());
+    storage.events.insert(
+      event({
+        id: "event-file",
+        sequence: 2,
+        source: "filesystem",
+        type: "file.modify",
+        summary: {
+          path: "README.md",
+          operation: "modify",
+          timingPrecision: "exact-final-diff",
+          sensitivity: "normal",
+        },
+      }),
+    );
+    const fixture = reportProvider();
+    const origin = await startControl(
+      storage,
+      64 * 1024 * 1024,
+      fixture.provider,
+    );
+
+    expect(
+      (
+        await get(origin, "/v1/sessions/session-query/report", {
+          authenticated: false,
+        })
+      ).status,
+    ).toBe(401);
+    const deterministic = await get(
+      origin,
+      "/v1/sessions/session-query/report?target_event_id=event-file",
+    );
+    expect(deterministic.status).toBe(200);
+    expect(json(deterministic)).toMatchObject({
+      requestedMode: "deterministic",
+      report: {
+        targetEventId: "event-file",
+        analysis: { mode: "deterministic", externalEvidenceSent: false },
+      },
+    });
+
+    const preflight = await get(
+      origin,
+      "/v1/sessions/session-query/report/preflight?target_event_id=event-file",
+    );
+    expect(preflight.status).toBe(200);
+    expect(json(preflight)).toMatchObject({
+      sessionId: "session-query",
+      targetEventId: "event-file",
+      provider: "fixture-provider",
+      model: "fixture-model",
+    });
+    const consentFingerprintSha256 = (
+      json(preflight) as { consentFingerprintSha256: string }
+    ).consentFingerprintSha256;
+    expect(fixture.requests).toHaveLength(0);
+
+    const wrongMethod = await get(
+      origin,
+      "/v1/sessions/session-query/report/ai",
+    );
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.allow).toBe("POST");
+    expect(
+      (
+        await get(origin, "/v1/sessions/session-query/report/ai", {
+          method: "POST",
+          authenticated: false,
+          body: JSON.stringify({ schemaVersion: 1, consent: true }),
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await get(origin, "/v1/sessions/session-query/report/ai", {
+          method: "POST",
+          body: JSON.stringify({ schemaVersion: 1, consent: false }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await get(origin, "/v1/sessions/session-query/report/ai", {
+          method: "POST",
+          body: JSON.stringify({ schemaVersion: 1, consent: true }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await get(origin, "/v1/sessions/session-query/report/ai", {
+          method: "POST",
+          body: JSON.stringify({ evidence: "x".repeat(17 * 1024) }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(fixture.requests).toHaveLength(0);
+
+    const enriched = await get(origin, "/v1/sessions/session-query/report/ai", {
+      method: "POST",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        consent: true,
+        consentFingerprintSha256,
+        targetEventId: "event-file",
+      }),
+    });
+    expect(enriched.status).toBe(200);
+    expect(json(enriched)).toMatchObject({
+      requestedMode: "ai",
+      report: {
+        targetEventId: "event-file",
+        analysis: {
+          mode: "ai-enriched",
+          externalEvidenceSent: true,
+          provider: "fixture-provider",
+        },
+      },
+      aiAttempt: { status: "completed" },
+    });
+    expect(fixture.requests).toHaveLength(1);
   });
 
   it("returns captured payload bytes with an inert download policy", async () => {

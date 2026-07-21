@@ -224,8 +224,318 @@ CREATE VIRTUAL TABLE event_search USING fts5(
 );
 `;
 
+const IMPORTED_READONLY_GUARDS_SQL = String.raw`
+CREATE TRIGGER imported_session_no_update
+BEFORE UPDATE ON sessions
+WHEN OLD.status = 'imported-readonly'
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_sequence_update
+BEFORE UPDATE ON session_sequences
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_raw_exchange_insert
+BEFORE INSERT ON raw_exchanges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_raw_exchange_update
+BEFORE UPDATE ON raw_exchanges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_event_insert
+BEFORE INSERT ON events
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_normalization_insert
+BEFORE INSERT ON normalization_runs
+WHEN EXISTS (
+  SELECT 1
+  FROM raw_exchanges
+  JOIN sessions ON sessions.id = raw_exchanges.session_id
+  WHERE raw_exchanges.id = NEW.exchange_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_file_change_insert
+BEFORE INSERT ON file_changes
+WHEN EXISTS (
+  SELECT 1
+  FROM events
+  JOIN sessions ON sessions.id = events.session_id
+  WHERE events.id = NEW.event_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_context_edge_insert
+BEFORE INSERT ON context_edges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_analysis_run_insert
+BEFORE INSERT ON analysis_runs
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_analysis_run_update
+BEFORE UPDATE ON analysis_runs
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_redaction_insert
+BEFORE INSERT ON redactions
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = NEW.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+`;
+
+const IMPORTED_READONLY_COMPLETE_GUARDS_SQL = String.raw`
+DROP TRIGGER imported_session_no_raw_exchange_update;
+CREATE TRIGGER imported_session_no_raw_exchange_update
+BEFORE UPDATE ON raw_exchanges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id IN (OLD.session_id, NEW.session_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+DROP TRIGGER imported_session_no_analysis_run_update;
+CREATE TRIGGER imported_session_no_analysis_run_update
+BEFORE UPDATE ON analysis_runs
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id IN (OLD.session_id, NEW.session_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_event_update
+BEFORE UPDATE ON events
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id IN (OLD.session_id, NEW.session_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_normalization_update
+BEFORE UPDATE ON normalization_runs
+WHEN EXISTS (
+  SELECT 1
+  FROM raw_exchanges
+  JOIN sessions ON sessions.id = raw_exchanges.session_id
+  WHERE raw_exchanges.id IN (OLD.exchange_id, NEW.exchange_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_file_change_update
+BEFORE UPDATE ON file_changes
+WHEN EXISTS (
+  SELECT 1
+  FROM events
+  JOIN sessions ON sessions.id = events.session_id
+  WHERE events.id IN (OLD.event_id, NEW.event_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_context_edge_update
+BEFORE UPDATE ON context_edges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id IN (OLD.session_id, NEW.session_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_redaction_update
+BEFORE UPDATE ON redactions
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id IN (OLD.session_id, NEW.session_id)
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_sequence_delete
+BEFORE DELETE ON session_sequences
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_raw_exchange_delete
+BEFORE DELETE ON raw_exchanges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_event_delete
+BEFORE DELETE ON events
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_normalization_delete
+BEFORE DELETE ON normalization_runs
+WHEN EXISTS (
+  SELECT 1
+  FROM raw_exchanges
+  JOIN sessions ON sessions.id = raw_exchanges.session_id
+  WHERE raw_exchanges.id = OLD.exchange_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_file_change_delete
+BEFORE DELETE ON file_changes
+WHEN EXISTS (
+  SELECT 1
+  FROM events
+  JOIN sessions ON sessions.id = events.session_id
+  WHERE events.id = OLD.event_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_context_edge_delete
+BEFORE DELETE ON context_edges
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_analysis_run_delete
+BEFORE DELETE ON analysis_runs
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+
+CREATE TRIGGER imported_session_no_redaction_delete
+BEFORE DELETE ON redactions
+WHEN EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.id = OLD.session_id
+    AND sessions.status = 'imported-readonly'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'imported session is read-only');
+END;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   defineMigration(1, "initial-evidence-schema", INITIAL_SCHEMA_SQL),
+  defineMigration(
+    2,
+    "imported-session-readonly-guards",
+    IMPORTED_READONLY_GUARDS_SQL,
+  ),
+  defineMigration(
+    3,
+    "complete-imported-session-readonly-guards",
+    IMPORTED_READONLY_COMPLETE_GUARDS_SQL,
+  ),
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

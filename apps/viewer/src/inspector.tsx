@@ -8,6 +8,8 @@ import type {
   ContextCompleteness,
   ContextResult,
   EventDetail,
+  IncidentReportResult,
+  ReportPreflight,
 } from "@blackbox/protocol";
 
 import type { ViewerApiClient } from "./api.js";
@@ -20,6 +22,7 @@ import {
 type InspectorTab =
   | "summary"
   | "blame"
+  | "report"
   | "context"
   | "normalized"
   | "raw"
@@ -34,6 +37,7 @@ interface PayloadChoice {
 
 export interface InspectorProps {
   readonly api: ViewerApiClient;
+  readonly sessionId?: string | undefined;
   readonly detail?: EventDetail | undefined;
   readonly loading: boolean;
   readonly error?: string | undefined;
@@ -517,6 +521,399 @@ export function blameAvailable(event: BlackBoxEvent): boolean {
   );
 }
 
+function ReportReferenceList(props: {
+  readonly references: readonly {
+    readonly eventId: string;
+    readonly statement: string;
+  }[];
+  readonly empty: string;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  if (props.references.length === 0) {
+    return <p className="inspector-note">{props.empty}</p>;
+  }
+  return (
+    <ul className="report-reference-list">
+      {props.references.map((reference, index) => (
+        <li key={`${reference.eventId}-${index}`}>
+          <span>{reference.statement}</span>
+          <EventLink
+            eventId={reference.eventId}
+            onSelectEvent={props.onSelectEvent}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ReportView(props: {
+  readonly result: IncidentReportResult;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  const report = props.result.report;
+  return (
+    <div className="report-view">
+      <section className={`report-verdict report-mode-${report.analysis.mode}`}>
+        <header>
+          <span>Incident report</span>
+          <strong>{report.analysis.mode}</strong>
+        </header>
+        <p>{report.impact}</p>
+        <dl>
+          <div>
+            <dt>capture</dt>
+            <dd>{report.capture.level}</dd>
+          </div>
+          <div>
+            <dt>context</dt>
+            <dd>{report.capture.contextCompleteness}</dd>
+          </div>
+          <div>
+            <dt>generated</dt>
+            <dd>{new Date(report.generatedAt).toLocaleString()}</dd>
+          </div>
+        </dl>
+      </section>
+
+      {report.capture.missingSignals.length === 0 ? null : (
+        <>
+          <h3>Capture limitations</h3>
+          <ul className="report-limitations">
+            {report.capture.missingSignals.map((signal) => (
+              <li key={signal}>{signal}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <h3>Factual timeline</h3>
+      {report.factualTimeline.length === 0 ? (
+        <p className="inspector-note">No factual timeline item was selected.</p>
+      ) : (
+        <ol className="report-timeline">
+          {report.factualTimeline.map((item) => (
+            <li key={item.eventId}>
+              <header>
+                <span>{item.evidence}</span>
+                <time>{new Date(item.occurredAt).toLocaleTimeString()}</time>
+              </header>
+              <p>{item.statement}</p>
+              <EventLink
+                eventId={item.eventId}
+                onSelectEvent={props.onSelectEvent}
+              />
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <h3>Root-cause hypothesis</h3>
+      <section className="report-hypothesis">
+        <header>
+          <strong>{report.rootCauseHypothesis.confidence} confidence</strong>
+          <span>inferred — not causal proof</span>
+        </header>
+        <p>{report.rootCauseHypothesis.statement}</p>
+      </section>
+      <ReportReferenceList
+        references={report.rootCauseHypothesis.supports}
+        empty="No supporting evidence reference met the threshold."
+        onSelectEvent={props.onSelectEvent}
+      />
+
+      <h3>Contributing conditions</h3>
+      <ReportReferenceList
+        references={report.contributingConditions}
+        empty="None identified."
+        onSelectEvent={props.onSelectEvent}
+      />
+
+      <h3>Counterevidence</h3>
+      <ReportReferenceList
+        references={report.counterevidence}
+        empty="None identified."
+        onSelectEvent={props.onSelectEvent}
+      />
+
+      <h3>Alternatives</h3>
+      {report.alternatives.length === 0 ? (
+        <p className="inspector-note">None identified.</p>
+      ) : (
+        <ul className="report-copy-list">
+          {report.alternatives.map((alternative, index) => (
+            <li key={`${alternative.explanation}-${index}`}>
+              <span>{alternative.explanation}</span>
+              <div>
+                {alternative.evidenceIds.map((eventId) => (
+                  <EventLink
+                    key={eventId}
+                    eventId={eventId}
+                    onSelectEvent={props.onSelectEvent}
+                  />
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3>Containment and recovery observations</h3>
+      <ReportReferenceList
+        references={report.containmentAndRecovery}
+        empty="None observed."
+        onSelectEvent={props.onSelectEvent}
+      />
+
+      <h3>Prevention actions</h3>
+      <ul className="report-copy-list">
+        {report.preventionActions.map((action, index) => (
+          <li key={`${action.action}-${index}`}>
+            <span>{action.action}</span>
+            <div>
+              {action.evidenceIds.map((eventId) => (
+                <EventLink
+                  key={eventId}
+                  eventId={eventId}
+                  onSelectEvent={props.onSelectEvent}
+                />
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <h3>Limitations</h3>
+      <ul className="report-limitations">
+        {report.limitations.map((limitation) => (
+          <li key={limitation}>{limitation}</li>
+        ))}
+      </ul>
+
+      <section className="report-disclosure">
+        <strong>Analysis and privacy</strong>
+        <span>{report.analysis.analyzer}</span>
+        <span>
+          External evidence used in this report:{" "}
+          {String(report.analysis.externalEvidenceSent)}
+        </span>
+        {report.analysis.mode === "ai-enriched" ? (
+          <>
+            <span>
+              {report.analysis.provider} / {report.analysis.model}
+            </span>
+            <span>Prompt: {report.analysis.promptVersion}</span>
+            <span>Analysis session: {report.analysis.analysisSessionId}</span>
+            <span>Snapshot: {report.analysis.transmittedEvidenceSha256}</span>
+            <span>
+              Usage: input {report.analysis.usage.inputTokens ?? "unknown"} ·
+              output {report.analysis.usage.outputTokens ?? "unknown"} · total{" "}
+              {report.analysis.usage.totalTokens ?? "unknown"}
+            </span>
+            <span>
+              Redactions:{" "}
+              {report.analysis.redactionRuleIds.join(", ") || "none"}
+            </span>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function ReportPreflightView(props: {
+  readonly preflight: ReportPreflight;
+  readonly enriching: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}): React.JSX.Element {
+  return (
+    <section
+      className="report-preflight"
+      role="dialog"
+      aria-modal="false"
+      aria-label="AI evidence transmission preview"
+    >
+      <span>EXTERNAL TRANSMISSION PREVIEW</span>
+      <h3>Review the redacted evidence snapshot</h3>
+      <p>
+        Confirming sends only the categories below to {props.preflight.provider}
+        {" / "}
+        {props.preflight.model}. Canceling makes no provider call.
+      </p>
+      <dl>
+        {props.preflight.categories.map((category) => (
+          <div key={category.category}>
+            <dt>{category.category}</dt>
+            <dd>
+              {category.itemCount.toLocaleString()} items ·{" "}
+              {category.byteLength.toLocaleString()} bytes
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p>
+        Total {props.preflight.totalBytes.toLocaleString()} bytes ·{" "}
+        {props.preflight.redactionCount.toLocaleString()} redactions
+      </p>
+      <p>
+        Prompt {props.preflight.promptVersion} · rules{" "}
+        {props.preflight.redactionRuleIds.join(", ") || "none"}
+      </p>
+      <code>snapshot sha256: {props.preflight.snapshotSha256}</code>
+      <code>
+        consent fingerprint: {props.preflight.consentFingerprintSha256}
+      </code>
+      <div className="report-consent-actions">
+        <button
+          type="button"
+          onClick={props.onConfirm}
+          disabled={props.enriching}
+        >
+          {props.enriching ? "SENDING…" : "SEND REDACTED EVIDENCE"}
+        </button>
+        <button
+          type="button"
+          className="quiet-button"
+          onClick={props.onCancel}
+          disabled={props.enriching}
+        >
+          CANCEL
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function ReportPanel(props: {
+  readonly api: ViewerApiClient;
+  readonly sessionId: string;
+  readonly targetEventId?: string | undefined;
+  readonly onSelectEvent: (eventId: string) => void;
+}): React.JSX.Element {
+  const [result, setResult] = useState<IncidentReportResult>();
+  const [preflight, setPreflight] = useState<ReportPreflight>();
+  const [error, setError] = useState<string>();
+  const [previewing, setPreviewing] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    setResult(undefined);
+    setPreflight(undefined);
+    setError(undefined);
+    void props.api
+      .getReport(props.sessionId, props.targetEventId)
+      .then((value) => current && setResult(value))
+      .catch((cause: unknown) => {
+        if (current) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Incident report unavailable",
+          );
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [props.api, props.sessionId, props.targetEventId]);
+
+  async function previewAi(): Promise<void> {
+    setPreviewing(true);
+    setError(undefined);
+    try {
+      setPreflight(
+        await props.api.getReportPreflight(
+          props.sessionId,
+          props.targetEventId,
+        ),
+      );
+    } catch (cause: unknown) {
+      setError(
+        cause instanceof Error ? cause.message : "Preflight unavailable",
+      );
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function confirmAi(): Promise<void> {
+    const reviewedPreflight = preflight;
+    if (reviewedPreflight === undefined) {
+      setError("Review an AI transmission preview before confirming.");
+      return;
+    }
+    setEnriching(true);
+    setError(undefined);
+    try {
+      const enriched = await props.api.enrichReport(
+        props.sessionId,
+        reviewedPreflight.consentFingerprintSha256,
+        props.targetEventId,
+      );
+      setResult(enriched);
+      setPreflight(undefined);
+    } catch (cause: unknown) {
+      setPreflight(undefined);
+      setError(
+        cause instanceof Error ? cause.message : "AI enrichment unavailable",
+      );
+    } finally {
+      setEnriching(false);
+    }
+  }
+
+  if (error !== undefined && result === undefined) {
+    return <p className="error-banner">{error}</p>;
+  }
+  if (result === undefined) {
+    return <p className="inspector-note">Generating offline report…</p>;
+  }
+  return (
+    <div>
+      {error === undefined ? null : <p className="error-banner">{error}</p>}
+      {result.aiAttempt.status === "failed" ? (
+        <p className="error-banner">
+          AI enrichment failed
+          {result.aiAttempt.externalEvidenceSent
+            ? " after the redacted evidence was sent"
+            : " before external evidence was sent"}
+          ; the deterministic report remains intact: {result.aiAttempt.error}
+        </p>
+      ) : null}
+      <ReportView result={result} onSelectEvent={props.onSelectEvent} />
+      {preflight === undefined ? (
+        <section className="report-ai-opt-in">
+          <strong>Optional AI explanation</strong>
+          <p>
+            Offline is the default. Preview the minimized, redacted evidence
+            before deciding whether to send it.
+          </p>
+          <button
+            type="button"
+            onClick={() => void previewAi()}
+            disabled={previewing || enriching}
+          >
+            {previewing ? "PREPARING…" : "PREVIEW AI TRANSMISSION"}
+          </button>
+        </section>
+      ) : (
+        <ReportPreflightView
+          preflight={preflight}
+          enriching={enriching}
+          onConfirm={() => void confirmAi()}
+          onCancel={() => setPreflight(undefined)}
+        />
+      )}
+      <details className="report-markdown">
+        <summary>Report Markdown handoff</summary>
+        <pre data-render-policy="inert-text-only">{result.markdown}</pre>
+      </details>
+    </div>
+  );
+}
+
 function payloadChoices(detail: EventDetail): PayloadChoice[] {
   const choices: PayloadChoice[] = [];
   if (detail.event.payloadRef !== undefined) {
@@ -853,6 +1250,7 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
   const detail = props.detail;
   const tabs: InspectorTab[] = [
     "summary",
+    ...(props.sessionId === undefined ? [] : (["report"] as const)),
     ...(detail !== undefined && blameAvailable(detail.event)
       ? (["blame"] as const)
       : []),
@@ -914,6 +1312,17 @@ export function Inspector(props: InspectorProps): React.JSX.Element {
           <BlamePanel
             api={props.api}
             eventId={detail.event.id}
+            onSelectEvent={props.onSelectEvent}
+          />
+        ) : null}
+        {tab === "report" && props.sessionId !== undefined ? (
+          <ReportPanel
+            key={`${props.sessionId}:${blameAvailable(detail.event) ? detail.event.id : "session"}`}
+            api={props.api}
+            sessionId={props.sessionId}
+            targetEventId={
+              blameAvailable(detail.event) ? detail.event.id : undefined
+            }
             onSelectEvent={props.onSelectEvent}
           />
         ) : null}

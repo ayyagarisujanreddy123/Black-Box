@@ -83,6 +83,7 @@ describe("authoritative workspace snapshots", () => {
     observer.startWatching((change) => {
       watched.push(change);
     });
+    await delay(50);
 
     await Promise.all([
       writeFile(join(root, "modify.txt"), "after modify\n"),
@@ -196,6 +197,7 @@ describe("authoritative workspace snapshots", () => {
     observer.startWatching((change) => {
       watched.push(change);
     });
+    await delay(50);
 
     await Promise.all([
       writeFile(join(root, "modify.txt"), "new\n"),
@@ -261,6 +263,7 @@ describe("authoritative workspace snapshots", () => {
     observer.startWatching((change) => {
       watched.push(change);
     });
+    await delay(50);
 
     await writeFile(
       join(root, "external", "outside.txt"),

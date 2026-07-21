@@ -1,6 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { BlackBoxDaemon } from "@blackbox/daemon";
+import {
+  BlackBoxDaemon,
+  openAiReportProviderFromEnvironment,
+} from "@blackbox/daemon";
 
 import {
   parseCliArguments,
@@ -18,6 +21,16 @@ async function runDaemonWorker(arguments_: readonly string[]): Promise<number> {
   try {
     const parsed = parseCliArguments(["start", ...arguments_]);
     const configuration = resolveStartConfiguration(parsed.flags, {});
+    const aiReportProvider = (() => {
+      try {
+        return openAiReportProviderFromEnvironment(process.env);
+      } catch (error: unknown) {
+        process.stderr.write(
+          `[${new Date().toISOString()}] optional AI analysis disabled: ${errorMessage(error)}\n`,
+        );
+        return undefined;
+      }
+    })();
     daemon = new BlackBoxDaemon({
       homeDirectory: configuration.paths.homeDirectory,
       proxy: {
@@ -39,7 +52,15 @@ async function runDaemonWorker(arguments_: readonly string[]): Promise<number> {
         listenHost: configuration.controlHost,
         listenPort: configuration.controlPort,
       },
+      ...(configuration.maximumStoredBytes === undefined
+        ? {}
+        : {
+            blobStore: {
+              maxStoredBytes: configuration.maximumStoredBytes,
+            },
+          }),
       viewerDirectory: packagedViewerDirectory(),
+      ...(aiReportProvider === undefined ? {} : { aiReportProvider }),
       shutdownGraceMilliseconds: configuration.shutdownGraceMilliseconds,
     });
 

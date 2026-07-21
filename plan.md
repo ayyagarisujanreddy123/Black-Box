@@ -1,6 +1,6 @@
 # Black Box Execution Plan
 
-Status: M0–M7 complete; M8 ready to execute
+Status: M0–M9 source implementation complete; public release operations pending
 
 Version: 0.1
 
@@ -292,6 +292,8 @@ Exit artifact: the core “catch it red-handed” demo works offline.
 
 ### M8 — Incident report and optional AI analysis
 
+Implementation status: Complete on 2026-07-20. The exit artifact is covered by deterministic report, evidence minimization/redaction, citation validation, structured-output transport, storage/cache, internal-session isolation, authenticated consent API, CLI fallback, and inert viewer tests.
+
 Goal: produce a useful, shareable explanation without laundering inference into fact.
 
 Tasks:
@@ -317,6 +319,8 @@ Acceptance:
 Exit artifact: defensible post-mortem with optional narrative enrichment.
 
 ### M9 — Export, polish, release, and rehearsal
+
+Implementation status: Source work completed on 2026-07-20. Versioned share/forensic archives, strict read-only import, retention/quotas, public documentation, measured local smoke results, and the repeatable offline fallback are covered by the full gate. A dependency-clean macOS build and two consecutive proxy-disabled fixture rehearsals passed. Linux/Windows clean-install validation, fallback media, signing, tagging, and publication remain release-operations work and are not claimed here.
 
 Goal: make the project easy to judge and safe to demonstrate.
 

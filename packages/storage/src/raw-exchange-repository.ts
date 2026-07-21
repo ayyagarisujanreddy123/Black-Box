@@ -107,6 +107,21 @@ export class RawExchangeRepository {
     return exchange;
   }
 
+  insertArchived(
+    input: RawExchange,
+    journalState: Exclude<RawJournalState, "recording">,
+    now: string = new Date().toISOString(),
+  ): RawExchange {
+    const exchange = RawExchangeSchema.parse(input);
+    if (exchange.endedAt === undefined) {
+      throw new ImmutableEvidenceError(
+        "An archived raw exchange requires an end time.",
+      );
+    }
+    this.insert(exchange, journalState, now);
+    return exchange;
+  }
+
   private insert(
     exchange: RawExchange,
     journalState: RawJournalState,

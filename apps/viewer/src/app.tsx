@@ -504,6 +504,7 @@ export function BlackBoxCockpit(props: CockpitProps): React.JSX.Element {
         <aside className="inspector" aria-label="Evidence inspector">
           <Inspector
             api={props.api}
+            sessionId={session?.id}
             detail={detail}
             loading={detailLoading}
             error={detailError}

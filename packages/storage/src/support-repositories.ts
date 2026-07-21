@@ -180,24 +180,32 @@ export class AnalysisRunRepository {
   findCompleted(
     sessionId: string,
     kind: AnalysisRunRecord["kind"],
-    targetEventId: string,
+    targetEventId: string | undefined,
     analyzer: string,
   ): AnalysisRunRecord | undefined {
+    const targetPredicate =
+      targetEventId === undefined
+        ? "target_event_id IS NULL"
+        : "target_event_id = @targetEventId";
     const row = this.database
       .prepare(
         `SELECT record_json
          FROM analysis_runs
-         WHERE session_id = ?
-           AND kind = ?
-           AND target_event_id = ?
-           AND analyzer = ?
+         WHERE session_id = @sessionId
+           AND kind = @kind
+           AND ${targetPredicate}
+           AND analyzer = @analyzer
            AND status = 'completed'
            AND result_blob_id IS NOT NULL
          ORDER BY ended_at DESC, id DESC
          LIMIT 1`,
       )
-      .get(sessionId, kind, targetEventId, analyzer) as
-      RecordJsonRow | undefined;
+      .get({
+        sessionId,
+        kind,
+        targetEventId: targetEventId ?? null,
+        analyzer,
+      }) as RecordJsonRow | undefined;
     return row === undefined
       ? undefined
       : AnalysisRunRecordSchema.parse(JSON.parse(row.record_json));

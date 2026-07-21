@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">Black Box local evidence architecture</title>
+  <desc id="description">Agent traffic and wrapped process signals flow into a localhost recorder, an append-only evidence store, deterministic analysis, the cockpit, and tamper-evident archives.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#82e9a6" />
+    </marker>
+    <style>
+      .background { fill: #07110d; }
+      .panel { fill: #0d1d16; stroke: #3d7d59; stroke-width: 2; rx: 12; }
+      .core { fill: #10271c; stroke: #82e9a6; stroke-width: 3; rx: 14; }
+      .label { fill: #e8fff0; font: 700 19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .copy { fill: #a9c7b4; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .title { fill: #82e9a6; font: 800 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 2px; }
+      .arrow { fill: none; stroke: #82e9a6; stroke-width: 3; marker-end: url(#arrow); }
+      .secondary { fill: none; stroke: #527562; stroke-width: 2; stroke-dasharray: 8 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect class="background" width="1200" height="620" />
+  <text class="title" x="600" y="52" text-anchor="middle">BLACK BOX · LOCAL EVIDENCE PATH</text>
+
+  <rect class="panel" x="42" y="104" width="240" height="112" />
+  <text class="label" x="162" y="145" text-anchor="middle">AGENT / CLIENT</text>
+  <text class="copy" x="162" y="176" text-anchor="middle">OpenAI-compatible HTTP</text>
+  <text class="copy" x="162" y="199" text-anchor="middle">session-scoped base URL</text>
+
+  <rect class="core" x="365" y="92" width="280" height="136" />
+  <text class="label" x="505" y="137" text-anchor="middle">LOCALHOST RECORDER</text>
+  <text class="copy" x="505" y="169" text-anchor="middle">byte-faithful forwarding</text>
+  <text class="copy" x="505" y="193" text-anchor="middle">safe headers · bounded bodies</text>
+
+  <rect class="panel" x="730" y="104" width="230" height="112" />
+  <text class="label" x="845" y="145" text-anchor="middle">UPSTREAM</text>
+  <text class="copy" x="845" y="176" text-anchor="middle">provider response</text>
+  <text class="copy" x="845" y="199" text-anchor="middle">unchanged to client</text>
+
+  <rect class="panel" x="42" y="300" width="240" height="130" />
+  <text class="label" x="162" y="342" text-anchor="middle">WRAPPER SIGNALS</text>
+  <text class="copy" x="162" y="374" text-anchor="middle">stdout / stderr / exit</text>
+  <text class="copy" x="162" y="398" text-anchor="middle">workspace baseline + diff</text>
+
+  <rect class="core" x="365" y="286" width="280" height="158" />
+  <text class="label" x="505" y="328" text-anchor="middle">EVIDENCE JOURNAL</text>
+  <text class="copy" x="505" y="360" text-anchor="middle">canonical event sequence</text>
+  <text class="copy" x="505" y="384" text-anchor="middle">SQLite WAL + SHA-256 blobs</text>
+  <text class="copy" x="505" y="408" text-anchor="middle">raw bytes remain recoverable</text>
+
+  <rect class="panel" x="730" y="286" width="230" height="158" />
+  <text class="label" x="845" y="328" text-anchor="middle">LOCAL ANALYSIS</text>
+  <text class="copy" x="845" y="360" text-anchor="middle">context · blame · anomaly</text>
+  <text class="copy" x="845" y="384" text-anchor="middle">incident report</text>
+  <text class="copy" x="845" y="408" text-anchor="middle">facts ≠ inference</text>
+
+  <rect class="panel" x="1000" y="286" width="158" height="158" />
+  <text class="label" x="1079" y="328" text-anchor="middle">INSPECT</text>
+  <text class="copy" x="1079" y="360" text-anchor="middle">CLI</text>
+  <text class="copy" x="1079" y="384" text-anchor="middle">cockpit</text>
+  <text class="copy" x="1079" y="408" text-anchor="middle">live SSE</text>
+
+  <rect class="panel" x="730" y="500" width="428" height="82" />
+  <text class="label" x="944" y="534" text-anchor="middle">.BBX ARCHIVE</text>
+  <text class="copy" x="944" y="560" text-anchor="middle">share / forensic · manifest hashes · read-only import</text>
+
+  <path class="arrow" d="M 282 160 L 365 160" />
+  <path class="arrow" d="M 645 160 L 730 160" />
+  <path class="arrow" d="M 505 228 L 505 286" />
+  <path class="arrow" d="M 282 365 L 365 365" />
+  <path class="arrow" d="M 645 365 L 730 365" />
+  <path class="arrow" d="M 960 365 L 1000 365" />
+  <path class="arrow" d="M 845 444 L 845 500" />
+  <path class="secondary" d="M 1079 444 L 1079 500" />
+</svg>

@@ -297,7 +297,9 @@ describe("CLI daemon lifecycle", () => {
           body: JSON.stringify({ model: "fixture", input: "wrapped" })
         });
         const body = await response.text();
+        await new Promise((resolve) => setTimeout(resolve, 50));
         require("node:fs").writeFileSync("agent-output.txt", "created by child\\n");
+        await new Promise((resolve) => setTimeout(resolve, 100));
         process.stdout.write(JSON.stringify({
           base: process.env.OPENAI_BASE_URL,
           session: process.env.BLACKBOX_SESSION_ID,
@@ -788,6 +790,392 @@ describe("CLI canonical inspection", () => {
 
     expect(await runCli(["inspect"], runtime(stdout, stderr))).toBe(2);
     expect(stderr.value).toContain("requires exactly one session ID");
+  });
+
+  it("emits incident reports offline and treats --ai as explicit scoped consent", async () => {
+    const root = await temporaryRoot();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const cliRuntime = runtime(stdout, stderr);
+    const paths = resolveDaemonPaths(root);
+    const startedAt = "2026-07-18T12:00:00.000Z";
+
+    expect(await runCli(["init", "--home", root], cliRuntime)).toBe(0);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      storage.sessions.create({
+        schemaVersion: 1,
+        id: "session-report-cli",
+        startedAt,
+        status: "completed",
+        captureLevel: "wrapped-process",
+        models: [],
+        tags: [],
+        counts: {
+          events: 1,
+          errors: 0,
+          inputTokens: null,
+          outputTokens: null,
+        },
+        metadata: {},
+      });
+      storage.events.insert({
+        schemaVersion: 1,
+        id: "event-report-delete",
+        sessionId: "session-report-cli",
+        sequence: 1,
+        occurredAt: startedAt,
+        observedAt: startedAt,
+        source: "filesystem",
+        type: "file.delete",
+        evidence: "observed",
+        summary: {
+          path: "test/example.test.ts",
+          operation: "delete",
+          timingPrecision: "exact-final-diff",
+          sensitivity: "normal",
+        },
+        redaction: { applied: false, ruleIds: [] },
+      });
+    } finally {
+      storage.close();
+    }
+
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "report",
+          "session-report-cli",
+          "--target-event",
+          "event-report-delete",
+          "--home",
+          root,
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    const deterministic = JSON.parse(stdout.value) as {
+      requestedMode: string;
+      report: {
+        targetEventId: string;
+        analysis: { mode: string; externalEvidenceSent: boolean };
+      };
+    };
+    expect(deterministic).toMatchObject({
+      requestedMode: "deterministic",
+      report: {
+        targetEventId: "event-report-delete",
+        analysis: { mode: "deterministic", externalEvidenceSent: false },
+      },
+    });
+    expect(stderr.value).toBe("");
+
+    stdout.clear();
+    expect(
+      await runCli(
+        ["report", "session-report-cli", "--home", root],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(stdout.value).toContain("# Black Box Incident Report");
+    expect(stdout.value).toContain("blackbox://event/event-report-delete");
+
+    stdout.clear();
+    stderr.clear();
+    expect(
+      await runCli(
+        ["report", "session-report-cli", "--home", root, "--ai", "--json"],
+        {
+          ...cliRuntime,
+          environment: {
+            OPENAI_API_KEY: "must-not-be-used-for-analysis",
+            OPENAI_MODEL: "must-not-be-used-for-analysis",
+          },
+        },
+      ),
+    ).toBe(0);
+    const fallback = JSON.parse(stdout.value) as {
+      requestedMode: string;
+      report: { analysis: { externalEvidenceSent: boolean } };
+      aiAttempt: { status: string };
+    };
+    expect(fallback).toMatchObject({
+      requestedMode: "ai",
+      report: { analysis: { externalEvidenceSent: false } },
+      aiAttempt: { status: "failed" },
+    });
+    expect(stderr.value).toContain("AI preflight:");
+    expect(stderr.value).toContain("provider=not-configured");
+    expect(stderr.value).toContain("deterministic report preserved");
+    expect(stderr.value).not.toContain("must-not-be-used-for-analysis");
+
+    stdout.clear();
+    stderr.clear();
+    expect(
+      await runCli(
+        ["report", "session-report-cli", "--home", root, "--ai", "--json"],
+        {
+          ...cliRuntime,
+          environment: {
+            BLACKBOX_ANALYSIS_API_KEY: "dedicated-analysis-key",
+            BLACKBOX_ANALYSIS_MODEL: "fixture-model",
+            BLACKBOX_ANALYSIS_BASE_URL:
+              "https://user:password@analysis.example/v1/",
+          },
+        },
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      report: { analysis: { externalEvidenceSent: false } },
+      aiAttempt: { status: "failed", externalEvidenceSent: false },
+    });
+    expect(stderr.value).toContain("AI configuration is invalid");
+    expect(stderr.value).toContain("deterministic report preserved");
+    expect(stderr.value).not.toContain("dedicated-analysis-key");
+  });
+
+  it("validates report positional arguments and flags", async () => {
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+
+    expect(await runCli(["report"], runtime(stdout, stderr))).toBe(2);
+    expect(stderr.value).toContain("requires exactly one session ID");
+    expect(
+      parseCliArguments([
+        "report",
+        "session-id",
+        "--target-event",
+        "event-id",
+        "--ai",
+        "--json",
+      ]),
+    ).toMatchObject({
+      command: "report",
+      positionals: ["session-id"],
+      help: false,
+    });
+  });
+
+  it("exports, imports, previews deletion, and prunes through explicit CLI controls", async () => {
+    const sourceRoot = await temporaryRoot();
+    const destinationRoot = await temporaryRoot();
+    const outputRoot = await temporaryRoot();
+    const archivePath = join(outputRoot, "fixture.bbx");
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const cliRuntime: Partial<CliRuntime> = {
+      ...runtime(stdout, stderr),
+      now: () => new Date("2026-07-20T12:00:00.000Z"),
+    };
+    expect(await runCli(["init", "--home", sourceRoot], cliRuntime)).toBe(0);
+    expect(await runCli(["init", "--home", destinationRoot], cliRuntime)).toBe(
+      0,
+    );
+    const sourcePaths = resolveDaemonPaths(sourceRoot);
+    const source = await openBlackBoxStorage({
+      databasePath: sourcePaths.databasePath,
+      dataDirectory: sourcePaths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      source.sessions.create({
+        schemaVersion: 1,
+        id: "session-archive-cli",
+        startedAt: "2026-07-01T12:00:00.000Z",
+        status: "active",
+        captureLevel: "wrapped-process",
+        command: {
+          executable: "fixture-agent",
+          arguments: ["--token=sk-proj-clisecretfixture123"],
+          cwd: "/private/cli-fixture",
+        },
+        repoRoot: "/private/cli-fixture",
+        models: [],
+        tags: [],
+        counts: {
+          events: 0,
+          errors: 0,
+          inputTokens: null,
+          outputTokens: null,
+        },
+        metadata: {},
+      });
+      source.events.insert({
+        schemaVersion: 1,
+        id: "event-archive-cli",
+        sessionId: "session-archive-cli",
+        sequence: 1,
+        occurredAt: "2026-07-01T12:00:01.000Z",
+        observedAt: "2026-07-01T12:00:01.000Z",
+        source: "filesystem",
+        type: "file.delete",
+        evidence: "observed",
+        summary: {
+          path: "test/archive.test.ts",
+          operation: "delete",
+          timingPrecision: "exact-final-diff",
+        },
+        redaction: { applied: false, ruleIds: [] },
+      });
+      const current = source.sessions.getRequired("session-archive-cli");
+      source.sessions.replace({
+        ...current,
+        endedAt: "2026-07-01T12:00:02.000Z",
+        status: "completed",
+      });
+    } finally {
+      source.close();
+    }
+
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "export",
+          "session-archive-cli",
+          "--home",
+          sourceRoot,
+          "--output",
+          archivePath,
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      sessionId: "session-archive-cli",
+      profile: "share",
+      path: archivePath,
+    });
+    expect((await stat(archivePath)).mode & 0o777).toBe(0o600);
+    expect(
+      await runCli(
+        [
+          "export",
+          "session-archive-cli",
+          "--home",
+          sourceRoot,
+          "--output",
+          archivePath,
+        ],
+        cliRuntime,
+      ),
+    ).toBe(1);
+    expect(stderr.value).toContain("Refusing to overwrite");
+
+    stdout.clear();
+    stderr.clear();
+    expect(
+      await runCli(
+        ["import", archivePath, "--home", destinationRoot, "--json"],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      sessionId: "session-archive-cli",
+      profile: "share",
+      readOnly: true,
+    });
+
+    stdout.clear();
+    expect(
+      await runCli(
+        ["delete", "session-archive-cli", "--home", destinationRoot, "--json"],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({ applied: false });
+    let destination = await openBlackBoxStorage({
+      databasePath: resolveDaemonPaths(destinationRoot).databasePath,
+      dataDirectory: resolveDaemonPaths(destinationRoot).dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    expect(destination.sessions.get("session-archive-cli")).toBeDefined();
+    destination.close();
+
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "delete",
+          "session-archive-cli",
+          "--home",
+          destinationRoot,
+          "--yes",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    destination = await openBlackBoxStorage({
+      databasePath: resolveDaemonPaths(destinationRoot).databasePath,
+      dataDirectory: resolveDaemonPaths(destinationRoot).dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    expect(destination.sessions.get("session-archive-cli")).toBeUndefined();
+    destination.close();
+
+    stdout.clear();
+    expect(
+      await runCli(
+        ["prune", "--home", sourceRoot, "--older-than-days", "1", "--json"],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      applied: false,
+      plan: { sessions: [{ sessionId: "session-archive-cli" }] },
+    });
+    stdout.clear();
+    expect(
+      await runCli(
+        [
+          "prune",
+          "--home",
+          sourceRoot,
+          "--older-than-days",
+          "1",
+          "--yes",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(stdout.value)).toMatchObject({ applied: true });
+  });
+
+  it("parses archive and retention commands without broadening their flags", () => {
+    expect(
+      parseCliArguments([
+        "export",
+        "session-id",
+        "--output",
+        "fixture.bbx",
+        "--profile",
+        "forensic",
+        "--force",
+      ]),
+    ).toMatchObject({ command: "export", positionals: ["session-id"] });
+    expect(parseCliArguments(["import", "fixture.bbx"])).toMatchObject({
+      command: "import",
+      positionals: ["fixture.bbx"],
+    });
+    expect(parseCliArguments(["delete", "session-id", "--yes"])).toMatchObject({
+      command: "delete",
+      positionals: ["session-id"],
+    });
+    expect(
+      parseCliArguments(["prune", "--max-bytes", "1024", "--yes"]),
+    ).toMatchObject({ command: "prune", positionals: [] });
+    expect(() =>
+      parseCliArguments(["import", "fixture.bbx", "--force"]),
+    ).toThrow("not valid for import");
   });
 });
 

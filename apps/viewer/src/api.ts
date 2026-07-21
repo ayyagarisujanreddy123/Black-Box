@@ -6,7 +6,9 @@ import {
   EventPageSchema,
   EventSearchResultSchema,
   FileChangePageSchema,
+  IncidentReportResultSchema,
   LiveEventReadySchema,
+  ReportPreflightSchema,
   SessionDetailSchema,
   SessionPageSchema,
   type BlackBoxEvent,
@@ -16,6 +18,8 @@ import {
   type EventPage,
   type EventSearchResult,
   type FileChangePage,
+  type IncidentReportResult,
+  type ReportPreflight,
   type SessionDetail,
   type SessionPage,
 } from "@blackbox/protocol";
@@ -195,6 +199,49 @@ export class ViewerApiClient {
     );
   }
 
+  getReport(
+    sessionId: string,
+    targetEventId?: string,
+  ): Promise<IncidentReportResult> {
+    const parameters = new URLSearchParams();
+    appendParameter(parameters, "target_event_id", targetEventId);
+    const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+    return this.getJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/report${suffix}`,
+      IncidentReportResultSchema,
+    );
+  }
+
+  getReportPreflight(
+    sessionId: string,
+    targetEventId?: string,
+  ): Promise<ReportPreflight> {
+    const parameters = new URLSearchParams();
+    appendParameter(parameters, "target_event_id", targetEventId);
+    const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+    return this.getJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/report/preflight${suffix}`,
+      ReportPreflightSchema,
+    );
+  }
+
+  enrichReport(
+    sessionId: string,
+    consentFingerprintSha256: string,
+    targetEventId?: string,
+  ): Promise<IncidentReportResult> {
+    return this.postJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/report/ai`,
+      {
+        schemaVersion: 1,
+        consent: true,
+        consentFingerprintSha256,
+        ...(targetEventId === undefined ? {} : { targetEventId }),
+      },
+      IncidentReportResultSchema,
+    );
+  }
+
   listFileChanges(
     sessionId: string,
     input: { readonly limit?: number; readonly cursor?: string } = {},
@@ -256,6 +303,22 @@ export class ViewerApiClient {
   private async getJson<T>(path: string, schema: Schema<T>): Promise<T> {
     const response = await this.request(path, {
       headers: { accept: "application/json" },
+    });
+    return schema.parse(await response.json());
+  }
+
+  private async postJson<T>(
+    path: string,
+    body: unknown,
+    schema: Schema<T>,
+  ): Promise<T> {
+    const response = await this.request(path, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
     });
     return schema.parse(await response.json());
   }

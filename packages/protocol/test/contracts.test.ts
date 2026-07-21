@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AiReportRequestSchema,
+  BbxArchiveSchema,
   BlackBoxEventSchema,
   BlameResultSchema,
   ContextResultSchema,
@@ -324,6 +326,7 @@ describe("privacy and inference constraints", () => {
       contributingConditions: [],
       counterevidence: [],
       alternatives: [],
+      containmentAndRecovery: [],
       preventionActions: [
         {
           action: "Require approval before deleting tests.",
@@ -344,5 +347,97 @@ describe("privacy and inference constraints", () => {
     expect(report.factualTimeline[0]?.evidence).toBe("observed");
     expect(report.rootCauseHypothesis.evidence).toBe("inferred");
     expect(report.analysis.externalEvidenceSent).toBe(false);
+  });
+
+  it("binds AI report consent to one reviewed evidence snapshot", () => {
+    expect(
+      AiReportRequestSchema.parse({
+        schemaVersion: 1,
+        consent: true,
+        consentFingerprintSha256: "b".repeat(64),
+        targetEventId: "event-1",
+      }),
+    ).toMatchObject({
+      consent: true,
+      consentFingerprintSha256: "b".repeat(64),
+    });
+    expect(
+      AiReportRequestSchema.safeParse({
+        schemaVersion: 1,
+        consent: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      AiReportRequestSchema.safeParse({
+        schemaVersion: 1,
+        consent: false,
+        consentFingerprintSha256: "b".repeat(64),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts normalized BBX manifests and rejects traversal paths", () => {
+    const archive = {
+      schemaVersion: 1,
+      manifest: {
+        schemaVersion: 1,
+        format: "blackbox-bbx",
+        archiveId: "archive-1",
+        exportedAt: timestamp,
+        profile: "share",
+        sourceSessionId: "session-1",
+        sourceSessionStatus: "completed",
+        storageSchemaVersion: 2,
+        entries: [
+          {
+            path: "records/events.jsonl",
+            mediaType: "application/x-ndjson",
+            byteLength: 0,
+            sha256:
+              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          },
+        ],
+        blobs: [],
+        counts: {
+          sessions: 1,
+          events: 0,
+          rawExchanges: 0,
+          normalizationRuns: 0,
+          fileChanges: 0,
+          contextEdges: 0,
+          analysisRuns: 0,
+          redactions: 0,
+          blobs: 0,
+          reports: 0,
+        },
+        totalBytes: 0,
+        redaction: { applied: false, count: 0, ruleIds: [] },
+        warnings: ["Fixture archive."],
+      },
+      manifestSha256: "a".repeat(64),
+      entries: [
+        {
+          path: "records/events.jsonl",
+          encoding: "base64",
+          data: "",
+        },
+      ],
+    };
+    expect(BbxArchiveSchema.parse(archive).manifest.profile).toBe("share");
+    expect(
+      BbxArchiveSchema.safeParse({
+        ...archive,
+        manifest: {
+          ...archive.manifest,
+          entries: [
+            {
+              ...archive.manifest.entries[0],
+              path: "../evidence.json",
+            },
+          ],
+        },
+        entries: [{ ...archive.entries[0], path: "../evidence.json" }],
+      }).success,
+    ).toBe(false);
   });
 });

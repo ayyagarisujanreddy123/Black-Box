@@ -3,7 +3,9 @@ import {
   BlameAnalysisSchema,
   ContextResultSchema,
   CONTEXT_VISIBILITY_NOTICE,
+  IncidentReportResultSchema,
   LiveEventReadySchema,
+  ReportPreflightSchema,
 } from "@blackbox/protocol";
 import { describe, expect, it, vi } from "vitest";
 
@@ -38,6 +40,81 @@ function chunks(parts: readonly string[]): ReadableStream<Uint8Array> {
       }
       controller.close();
     },
+  });
+}
+
+function incidentReportResult() {
+  return IncidentReportResultSchema.parse({
+    schemaVersion: 1,
+    requestedMode: "deterministic",
+    report: {
+      schemaVersion: 1,
+      id: "report-viewer",
+      sessionId: "session-viewer",
+      targetEventId: "event-target",
+      generatedAt: "2026-07-16T12:00:00.000Z",
+      capture: {
+        level: "wrapped-process",
+        contextCompleteness: "exact-client-request",
+        missingSignals: [],
+      },
+      impact: "README.md changed.",
+      factualTimeline: [
+        {
+          eventId: "event-target",
+          occurredAt: "2026-07-16T12:00:00.000Z",
+          statement: "Filesystem evidence records a README.md change.",
+          evidence: "observed",
+        },
+      ],
+      rootCauseHypothesis: {
+        statement: "The available evidence does not prove a specific cause.",
+        evidence: "inferred",
+        confidence: "low",
+        supports: [],
+      },
+      contributingConditions: [],
+      counterevidence: [],
+      alternatives: [],
+      containmentAndRecovery: [],
+      preventionActions: [
+        {
+          action: "Review changes before commit.",
+          evidenceIds: ["event-target"],
+        },
+      ],
+      limitations: ["Recorded evidence does not prove intent."],
+      analysis: {
+        mode: "deterministic",
+        analyzer: "deterministic-report-v1",
+        promptVersion: null,
+        model: null,
+        externalEvidenceSent: false,
+        redactionRuleIds: [],
+      },
+    },
+    markdown: "# Black Box Incident Report\n",
+    aiAttempt: { status: "not-requested" },
+  });
+}
+
+function reportPreflight() {
+  return ReportPreflightSchema.parse({
+    schemaVersion: 1,
+    sessionId: "session-viewer",
+    targetEventId: "event-target",
+    provider: "fixture-provider",
+    model: "fixture-model",
+    promptVersion: "incident-explanation-v1",
+    categories: [
+      { category: "factual-timeline", itemCount: 1, byteLength: 120 },
+    ],
+    totalBytes: 120,
+    eventCount: 1,
+    redactionCount: 0,
+    redactionRuleIds: [],
+    snapshotSha256: "a".repeat(64),
+    consentFingerprintSha256: "b".repeat(64),
   });
 }
 
@@ -222,6 +299,79 @@ describe("viewer API transport", () => {
     expect(observations[0]?.headers.get("authorization")).toBe(
       `Bearer ${token}`,
     );
+  });
+
+  it("previews reports with GET and sends explicit consent only with POST", async () => {
+    const report = incidentReportResult();
+    const preflight = reportPreflight();
+    const observations: Array<{
+      url: string;
+      method: string;
+      headers: Headers;
+      body?: string | undefined;
+    }> = [];
+    const fetcher: typeof fetch = (input, init) => {
+      observations.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        headers: new Headers(init?.headers),
+        ...(typeof init?.body === "string" ? { body: init.body } : {}),
+      });
+      const responseBody = String(input).includes("/preflight")
+        ? preflight
+        : report;
+      return Promise.resolve(
+        new Response(JSON.stringify(responseBody), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const token = "r".repeat(43);
+    const api = new ViewerApiClient("http://127.0.0.1:4142", token, fetcher);
+
+    await expect(
+      api.getReport("session/viewer", "event/target"),
+    ).resolves.toEqual(report);
+    await expect(
+      api.getReportPreflight("session/viewer", "event/target"),
+    ).resolves.toEqual(preflight);
+    await expect(
+      api.enrichReport(
+        "session/viewer",
+        preflight.consentFingerprintSha256,
+        "event/target",
+      ),
+    ).resolves.toEqual(report);
+
+    expect(observations.map((item) => item.method)).toEqual([
+      "GET",
+      "GET",
+      "POST",
+    ]);
+    expect(observations[0]?.url).toBe(
+      "http://127.0.0.1:4142/v1/sessions/session%2Fviewer/report?target_event_id=event%2Ftarget",
+    );
+    expect(observations[1]?.url).toBe(
+      "http://127.0.0.1:4142/v1/sessions/session%2Fviewer/report/preflight?target_event_id=event%2Ftarget",
+    );
+    expect(observations[2]?.url).toBe(
+      "http://127.0.0.1:4142/v1/sessions/session%2Fviewer/report/ai",
+    );
+    expect(JSON.parse(observations[2]?.body ?? "null")).toEqual({
+      schemaVersion: 1,
+      consent: true,
+      consentFingerprintSha256: preflight.consentFingerprintSha256,
+      targetEventId: "event/target",
+    });
+    expect(observations[2]?.headers.get("content-type")).toBe(
+      "application/json",
+    );
+    expect(
+      observations.every(
+        (item) => item.headers.get("authorization") === `Bearer ${token}`,
+      ),
+    ).toBe(true);
   });
 
   it("binds the browser fetch receiver", async () => {

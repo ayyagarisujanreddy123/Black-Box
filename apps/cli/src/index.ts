@@ -7,18 +7,32 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import {
   CorruptDaemonLockError,
+  DEFAULT_MAXIMUM_ARCHIVE_BYTES,
   DaemonLock,
+  EvidenceQueryService,
+  executeEvidenceDeletion,
   ensureControlToken,
   ensureInstallLayout,
+  exportBbxArchive,
+  importBbxArchive,
   isProcessAlive,
+  planEvidencePrune,
+  planSessionDeletion,
+  readBbxArchiveFile,
   readControlToken,
   readDaemonLockRecord,
+  openAiReportProviderFromEnvironment,
   sessionScopedProxyBaseUrl,
+  writeBbxArchiveFile,
   type DaemonLockRecord,
   type DaemonPaths,
   type DaemonStatus,
 } from "@blackbox/daemon";
-import { IdentifierSchema } from "@blackbox/protocol";
+import {
+  BbxArchiveProfileSchema,
+  IdentifierSchema,
+  type ReportPreflight,
+} from "@blackbox/protocol";
 import { openBlackBoxStorage } from "@blackbox/storage";
 
 import {
@@ -64,6 +78,11 @@ Usage:
   blackbox doctor [--upstream URL] [--websocket] [--json]
   blackbox sessions [--limit N] [--json]
   blackbox inspect <session-id> [--limit N] [--type EVENT_TYPE] [--json]
+  blackbox report <session-id> [--target-event EVENT_ID] [--ai] [--json]
+  blackbox export <session-id> --output PATH [--profile share|forensic]
+  blackbox import <archive.bbx> [--json]
+  blackbox delete <session-id> [--yes] [--json]
+  blackbox prune [--older-than-days N] [--max-bytes N] [--yes] [--json]
   blackbox run [--cwd PATH] -- <command...>
 
 Common options:
@@ -81,6 +100,7 @@ Start and doctor options:
   --max-request-body-bytes N      Per-request capture bound
   --max-response-body-bytes N     Per-response capture bound
   --max-chunk-manifest-entries N  Per-exchange provenance entry bound
+  --max-stored-bytes N            Refuse new blobs above this stored-byte quota
   --upstream-timeout-ms MS        Optional provider timeout
 
 Inspection options:
@@ -88,6 +108,19 @@ Inspection options:
   --type EVENT_TYPE               Filter inspect output by canonical event type
   --cursor CURSOR                 Continue inspect from a prior JSON page
   --include-internal              Include isolated analysis sessions in listings
+
+Report options:
+  --target-event EVENT_ID         Analyze a specific tool or filesystem action
+  --ai                            Explicitly send the previewed redacted snapshot
+  --json                          Emit the versioned report result as JSON
+
+Archive and retention options:
+  --output PATH                   Destination for a .bbx export
+  --profile share|forensic       Redacted share archive (default) or full evidence
+  --max-bytes N                  Archive safety limit or retained evidence target
+  --older-than-days N            Select terminal sessions older than N days
+  --force                         Replace an existing export destination
+  --yes                           Apply a displayed delete/prune plan
 
 Run options:
   --cwd PATH                      Child working directory (default current directory)
@@ -891,6 +924,303 @@ async function commandInspect(
   }
 }
 
+function writeReportPreflight(
+  output: CliOutput,
+  preflight: ReportPreflight,
+): void {
+  output.write(
+    `AI preflight: ${preflight.totalBytes.toLocaleString()} bytes of minimized, redacted evidence across ${preflight.eventCount.toLocaleString()} events; provider=${preflight.provider}, model=${preflight.model}.\n`,
+  );
+  for (const category of preflight.categories) {
+    output.write(
+      `  ${category.category}: ${category.itemCount.toLocaleString()} items, ${category.byteLength.toLocaleString()} bytes\n`,
+    );
+  }
+  output.write(
+    `  redactions: ${preflight.redactionCount.toLocaleString()} (${preflight.redactionRuleIds.join(", ") || "none"})\n`,
+  );
+  output.write(`  prompt: ${preflight.promptVersion}\n`);
+  output.write(`  snapshot sha256: ${preflight.snapshotSha256}\n`);
+  output.write(
+    `  consent fingerprint: ${preflight.consentFingerprintSha256}\n`,
+  );
+}
+
+async function commandReport(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const sessionId = parsed.positionals[0];
+  if (sessionId === undefined) {
+    throw new CliUsageError("report requires exactly one session ID.");
+  }
+  const paths = pathsFromFlags(parsed.flags);
+  const storage = await openInspectionStorage(paths);
+  try {
+    const aiRequested = parsed.flags.has("ai");
+    const aiReportProvider = aiRequested
+      ? (() => {
+          try {
+            return openAiReportProviderFromEnvironment(runtime.environment);
+          } catch (error: unknown) {
+            runtime.stderr.write(
+              `AI configuration is invalid; continuing with the deterministic fallback: ${errorMessage(error)}\n`,
+            );
+            return undefined;
+          }
+        })()
+      : undefined;
+    const service = new EvidenceQueryService(storage, {
+      ...(aiReportProvider === undefined ? {} : { aiReportProvider }),
+      now: runtime.now,
+    });
+    const targetEventId = stringFlag(parsed.flags, "target-event");
+    const result = aiRequested
+      ? await (async () => {
+          const preflight = await service.getReportPreflight(
+            sessionId,
+            targetEventId,
+          );
+          writeReportPreflight(runtime.stderr, preflight);
+          return service.generateAiReport(sessionId, {
+            schemaVersion: 1,
+            consent: true,
+            consentFingerprintSha256: preflight.consentFingerprintSha256,
+            ...(targetEventId === undefined ? {} : { targetEventId }),
+          });
+        })()
+      : await service.getReport(sessionId, targetEventId);
+    if (parsed.flags.has("json")) {
+      runtime.stdout.write(`${JSON.stringify(result)}\n`);
+    } else {
+      runtime.stdout.write(result.markdown);
+    }
+    if (result.aiAttempt.status === "failed") {
+      runtime.stderr.write(
+        `AI enrichment failed ${
+          result.aiAttempt.externalEvidenceSent
+            ? "after the redacted evidence was sent"
+            : "before external evidence was sent"
+        }; deterministic report preserved: ${result.aiAttempt.error}\n`,
+      );
+    }
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
+function archiveMaximumBytes(
+  flags: ReadonlyMap<string, string | true>,
+): number {
+  return integerFlag(
+    flags,
+    "max-bytes",
+    DEFAULT_MAXIMUM_ARCHIVE_BYTES,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+}
+
+async function commandExport(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const sessionId = parsed.positionals[0];
+  if (sessionId === undefined) {
+    throw new CliUsageError("export requires exactly one session ID.");
+  }
+  const output = stringFlag(parsed.flags, "output");
+  if (output === undefined) {
+    throw new CliUsageError("export requires --output PATH.");
+  }
+  const parsedProfile = BbxArchiveProfileSchema.safeParse(
+    stringFlag(parsed.flags, "profile") ?? "share",
+  );
+  if (!parsedProfile.success) {
+    throw new CliUsageError("Flag --profile must be share or forensic.");
+  }
+  const paths = pathsFromFlags(parsed.flags);
+  const storage = await openInspectionStorage(paths);
+  try {
+    const report = await new EvidenceQueryService(storage, {
+      now: runtime.now,
+    }).getReport(sessionId);
+    const exported = await exportBbxArchive(storage, {
+      sessionId,
+      profile: parsedProfile.data,
+      report,
+      exportedAt: runtime.now().toISOString(),
+      maximumBytes: archiveMaximumBytes(parsed.flags),
+    });
+    const outputPath = resolve(output);
+    await writeBbxArchiveFile(
+      outputPath,
+      exported.bytes,
+      parsed.flags.has("force"),
+    );
+    if (parsedProfile.data === "forensic") {
+      runtime.stderr.write(
+        "Forensic archive warning: this file can contain prompts, outputs, paths, source payloads, and other sensitive evidence.\n",
+      );
+    }
+    const summary = {
+      archiveId: exported.archive.manifest.archiveId,
+      sessionId,
+      profile: exported.archive.manifest.profile,
+      path: outputPath,
+      archiveBytes: exported.bytes.byteLength,
+      entryBytes: exported.archive.manifest.totalBytes,
+      entries: exported.archive.manifest.entries.length,
+      redactions: exported.archive.manifest.redaction,
+    };
+    runtime.stdout.write(
+      parsed.flags.has("json")
+        ? `${JSON.stringify(summary)}\n`
+        : `Exported ${summary.profile} archive ${summary.archiveId} to ${summary.path} (${summary.archiveBytes.toLocaleString()} bytes, ${summary.redactions.count.toLocaleString()} export redactions).\n`,
+    );
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
+async function commandImport(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const archivePath = parsed.positionals[0];
+  if (archivePath === undefined) {
+    throw new CliUsageError("import requires exactly one archive path.");
+  }
+  const maximumBytes = archiveMaximumBytes(parsed.flags);
+  const resolvedArchivePath = resolve(archivePath);
+  const bytes = await readBbxArchiveFile(resolvedArchivePath, maximumBytes);
+  const paths = pathsFromFlags(parsed.flags);
+  const storage = await openInspectionStorage(paths);
+  try {
+    const result = await importBbxArchive(storage, {
+      bytes,
+      importedAt: runtime.now().toISOString(),
+      maximumBytes,
+    });
+    runtime.stdout.write(
+      parsed.flags.has("json")
+        ? `${JSON.stringify(result)}\n`
+        : `Imported session ${result.sessionId} as read-only from ${resolvedArchivePath} (${result.eventCount.toLocaleString()} events, ${result.blobCount.toLocaleString()} payload blobs).\n`,
+    );
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
+function writeDeletionPlan(
+  output: CliOutput,
+  plan: ReturnType<typeof planEvidencePrune>,
+): void {
+  output.write(
+    `Deletion preview: ${plan.sessions.length.toLocaleString()} sessions; logical evidence ${plan.current.logicalBytes.toLocaleString()} → ${plan.projected.logicalBytes.toLocaleString()} bytes.\n`,
+  );
+  for (const session of plan.sessions) {
+    output.write(
+      `  ${session.sessionId}\t${session.status}\t${session.logicalBytes.toLocaleString()} bytes\t${session.reasons.join(",")}\n`,
+    );
+  }
+  if (!plan.satisfied) {
+    output.write(
+      "The requested size target cannot be reached without deleting an active session.\n",
+    );
+  }
+}
+
+async function commandDelete(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const sessionId = parsed.positionals[0];
+  if (sessionId === undefined) {
+    throw new CliUsageError("delete requires exactly one session ID.");
+  }
+  const storage = await openInspectionStorage(pathsFromFlags(parsed.flags));
+  try {
+    const plan = planSessionDeletion(storage, sessionId);
+    if (!parsed.flags.has("yes")) {
+      runtime.stdout.write(
+        parsed.flags.has("json")
+          ? `${JSON.stringify({ applied: false, plan })}\n`
+          : "",
+      );
+      if (!parsed.flags.has("json")) {
+        writeDeletionPlan(runtime.stdout, plan);
+        runtime.stdout.write(
+          "No evidence deleted; rerun with --yes to apply.\n",
+        );
+      }
+      return 0;
+    }
+    const result = await executeEvidenceDeletion(storage, plan);
+    runtime.stdout.write(
+      parsed.flags.has("json")
+        ? `${JSON.stringify({ applied: true, result })}\n`
+        : `Deleted ${result.deletedSessionIds.length.toLocaleString()} sessions and ${result.garbageCollection.removedBlobs.toLocaleString()} unreferenced blobs; ${result.after.logicalBytes.toLocaleString()} logical bytes remain.\n`,
+    );
+    return 0;
+  } finally {
+    storage.close();
+  }
+}
+
+async function commandPrune(
+  parsed: ParsedCliArguments,
+  runtime: CliRuntime,
+): Promise<number> {
+  const olderThanDays =
+    stringFlag(parsed.flags, "older-than-days") === undefined
+      ? undefined
+      : integerFlag(parsed.flags, "older-than-days", 0, 0, 365_000);
+  const maximumBytes =
+    stringFlag(parsed.flags, "max-bytes") === undefined
+      ? undefined
+      : integerFlag(parsed.flags, "max-bytes", 0, 0, Number.MAX_SAFE_INTEGER);
+  if (olderThanDays === undefined && maximumBytes === undefined) {
+    throw new CliUsageError(
+      "prune requires --older-than-days N, --max-bytes N, or both.",
+    );
+  }
+  const storage = await openInspectionStorage(pathsFromFlags(parsed.flags));
+  try {
+    const plan = planEvidencePrune(storage, {
+      ...(olderThanDays === undefined ? {} : { olderThanDays }),
+      ...(maximumBytes === undefined ? {} : { maximumBytes }),
+      now: runtime.now(),
+    });
+    if (!parsed.flags.has("yes")) {
+      runtime.stdout.write(
+        parsed.flags.has("json")
+          ? `${JSON.stringify({ applied: false, plan })}\n`
+          : "",
+      );
+      if (!parsed.flags.has("json")) {
+        writeDeletionPlan(runtime.stdout, plan);
+        runtime.stdout.write(
+          "No evidence deleted; rerun with --yes to apply.\n",
+        );
+      }
+      return plan.satisfied ? 0 : 1;
+    }
+    const result = await executeEvidenceDeletion(storage, plan);
+    runtime.stdout.write(
+      parsed.flags.has("json")
+        ? `${JSON.stringify({ applied: true, satisfied: plan.satisfied, result })}\n`
+        : `Pruned ${result.deletedSessionIds.length.toLocaleString()} sessions and ${result.garbageCollection.removedBlobs.toLocaleString()} unreferenced blobs; ${result.after.logicalBytes.toLocaleString()} logical bytes remain.\n`,
+    );
+    return plan.satisfied ? 0 : 1;
+  } finally {
+    storage.close();
+  }
+}
+
 export async function runCli(
   arguments_: readonly string[],
   runtimeOverrides: Partial<CliRuntime> = {},
@@ -919,6 +1249,16 @@ export async function runCli(
         return await commandSessions(parsed, runtime);
       case "inspect":
         return await commandInspect(parsed, runtime);
+      case "report":
+        return await commandReport(parsed, runtime);
+      case "export":
+        return await commandExport(parsed, runtime);
+      case "import":
+        return await commandImport(parsed, runtime);
+      case "delete":
+        return await commandDelete(parsed, runtime);
+      case "prune":
+        return await commandPrune(parsed, runtime);
       case "run":
         return await commandRun(parsed, runtime);
     }

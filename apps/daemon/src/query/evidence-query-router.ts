@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  AiReportRequestSchema,
   EvidenceSourceSchema,
   LiveEventResumeQuerySchema,
   QueryErrorSchema,
@@ -35,6 +36,32 @@ export interface EvidenceQueryRouterOptions {
 }
 
 class InvalidQueryRequestError extends Error {}
+
+async function readJsonBody(
+  request: IncomingMessage,
+  maximumBytes = 16 * 1024,
+): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let byteLength = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += bytes.byteLength;
+    if (byteLength > maximumBytes) {
+      throw new InvalidQueryRequestError("Request body exceeds the limit.");
+    }
+    chunks.push(bytes);
+  }
+  if (byteLength === 0) {
+    throw new InvalidQueryRequestError("A JSON request body is required.");
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch (error: unknown) {
+    throw new InvalidQueryRequestError("Request body is not valid JSON.", {
+      cause: error,
+    });
+  }
+}
 
 function decoded(segment: string): string {
   try {
@@ -161,6 +188,36 @@ export class EvidenceQueryRouter {
     ) {
       return false;
     }
+    const aiReportRoute =
+      route === "sessions" &&
+      encodedSegments.length === 5 &&
+      encodedSegments[3] === "report" &&
+      encodedSegments[4] === "ai";
+    if (aiReportRoute) {
+      try {
+        assertAllowedParameters(url, new Set());
+        if (request.method !== "POST") {
+          request.resume();
+          sendJson(
+            response,
+            405,
+            QueryErrorSchema.parse({ error: "method_not_allowed" }),
+            { allow: "POST" },
+          );
+          return true;
+        }
+        const sessionId = decoded(encodedSegments[2] as string);
+        const body = AiReportRequestSchema.parse(await readJsonBody(request));
+        sendJson(
+          response,
+          200,
+          await this.options.query.generateAiReport(sessionId, body),
+        );
+        return true;
+      } catch (error: unknown) {
+        return this.handleError(error, response);
+      }
+    }
     if (!requireGet(request, response)) {
       return true;
     }
@@ -198,6 +255,36 @@ export class EvidenceQueryRouter {
           return true;
         }
         const childRoute = encodedSegments[3];
+        if (childRoute === "report") {
+          if (encodedSegments.length === 4) {
+            assertAllowedParameters(url, new Set(["target_event_id"]));
+            sendJson(
+              response,
+              200,
+              await this.options.query.getReport(
+                sessionId,
+                optionalParameter(url, "target_event_id"),
+              ),
+            );
+            return true;
+          }
+          if (
+            encodedSegments.length === 5 &&
+            encodedSegments[4] === "preflight"
+          ) {
+            assertAllowedParameters(url, new Set(["target_event_id"]));
+            sendJson(
+              response,
+              200,
+              await this.options.query.getReportPreflight(
+                sessionId,
+                optionalParameter(url, "target_event_id"),
+              ),
+            );
+            return true;
+          }
+          return false;
+        }
         if (encodedSegments.length !== 4) {
           return false;
         }
@@ -316,55 +403,59 @@ export class EvidenceQueryRouter {
       }
       return false;
     } catch (error: unknown) {
-      if (
-        error instanceof InvalidQueryRequestError ||
-        error instanceof RangeError ||
-        error instanceof z.ZodError
-      ) {
-        sendJson(
-          response,
-          400,
-          QueryErrorSchema.parse({
-            error: "bad_request",
-            message: "Invalid query path or parameters.",
-          }),
-        );
-        return true;
-      }
-      if (error instanceof EvidenceQueryNotFoundError) {
-        sendJson(response, 404, QueryErrorSchema.parse({ error: "not_found" }));
-        return true;
-      }
-      if (error instanceof EvidencePayloadTooLargeError) {
-        sendJson(
-          response,
-          413,
-          QueryErrorSchema.parse({
-            error: "payload_unavailable",
-            message: error.message,
-          }),
-        );
-        return true;
-      }
-      if (error instanceof LiveEventStreamCapacityError) {
-        sendJson(
-          response,
-          503,
-          QueryErrorSchema.parse({ error: "stream_capacity_exceeded" }),
-          { "retry-after": "1" },
-        );
-        return true;
-      }
-      if (response.headersSent) {
-        response.destroy();
-        return true;
-      }
+      return this.handleError(error, response);
+    }
+  }
+
+  private handleError(error: unknown, response: ServerResponse): boolean {
+    if (
+      error instanceof InvalidQueryRequestError ||
+      error instanceof RangeError ||
+      error instanceof z.ZodError
+    ) {
       sendJson(
         response,
-        500,
-        QueryErrorSchema.parse({ error: "internal_query_error" }),
+        400,
+        QueryErrorSchema.parse({
+          error: "bad_request",
+          message: "Invalid query path, parameters, or body.",
+        }),
       );
       return true;
     }
+    if (error instanceof EvidenceQueryNotFoundError) {
+      sendJson(response, 404, QueryErrorSchema.parse({ error: "not_found" }));
+      return true;
+    }
+    if (error instanceof EvidencePayloadTooLargeError) {
+      sendJson(
+        response,
+        413,
+        QueryErrorSchema.parse({
+          error: "payload_unavailable",
+          message: error.message,
+        }),
+      );
+      return true;
+    }
+    if (error instanceof LiveEventStreamCapacityError) {
+      sendJson(
+        response,
+        503,
+        QueryErrorSchema.parse({ error: "stream_capacity_exceeded" }),
+        { "retry-after": "1" },
+      );
+      return true;
+    }
+    if (response.headersSent) {
+      response.destroy();
+      return true;
+    }
+    sendJson(
+      response,
+      500,
+      QueryErrorSchema.parse({ error: "internal_query_error" }),
+    );
+    return true;
   }
 }

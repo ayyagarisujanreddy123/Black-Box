@@ -5,6 +5,7 @@ import {
   BlameAnalysisSchema,
   ContextResultSchema,
   CONTEXT_VISIBILITY_NOTICE,
+  IncidentReportResultSchema,
   type BlackBoxEvent,
 } from "@blackbox/protocol";
 import { createElement } from "react";
@@ -17,6 +18,7 @@ import {
   BlameView,
   ContextView,
   JsonBlock,
+  ReportView,
   blameAvailable,
 } from "../src/inspector.js";
 import { TimelineView } from "../src/timeline-view.js";
@@ -296,6 +298,76 @@ describe("viewer evidence model", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("renders report facts, inference labels, limitations, and recorded markup safely", () => {
+    const malicious = "<script>globalThis.compromised=true</script> README.md";
+    const result = IncidentReportResultSchema.parse({
+      schemaVersion: 1,
+      requestedMode: "deterministic",
+      report: {
+        schemaVersion: 1,
+        id: "report-view",
+        sessionId: "session-view",
+        targetEventId: "event-target",
+        generatedAt: TIME,
+        capture: {
+          level: "wrapped-process",
+          contextCompleteness: "partial-client-chain",
+          missingSignals: ["A prior response was unavailable."],
+        },
+        impact: malicious,
+        factualTimeline: [
+          {
+            eventId: "event-target",
+            occurredAt: TIME,
+            statement: malicious,
+            evidence: "observed",
+          },
+        ],
+        rootCauseHypothesis: {
+          statement: "A preceding action may have caused the change.",
+          evidence: "inferred",
+          confidence: "low",
+          supports: [
+            { eventId: "event-origin", statement: "Recorded support." },
+          ],
+        },
+        contributingConditions: [],
+        counterevidence: [],
+        alternatives: [],
+        containmentAndRecovery: [],
+        preventionActions: [
+          { action: "Review the diff.", evidenceIds: ["event-target"] },
+        ],
+        limitations: ["Recorded evidence does not prove intent."],
+        analysis: {
+          mode: "deterministic",
+          analyzer: "deterministic-report-v1",
+          promptVersion: null,
+          model: null,
+          externalEvidenceSent: false,
+          redactionRuleIds: [],
+        },
+      },
+      markdown: "# Black Box Incident Report\n",
+      aiAttempt: { status: "not-requested" },
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(ReportView, {
+        result,
+        onSelectEvent: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Factual timeline");
+    expect(html).toContain("inferred — not causal proof");
+    expect(html).toContain("Recorded evidence does not prove intent.");
+    expect(html).toContain("External evidence used in this report: false");
+    expect(html).toContain("event-target");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 
   it("renders only a bounded window for a 10,000-event timeline", () => {

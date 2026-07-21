@@ -273,7 +273,8 @@ function captureLimitCheck(
     status: constrained ? "warn" : "pass",
     message:
       `queue=${proxy.captureQueueMaxBytes}B request=${proxy.maxRequestBodyBytes}B ` +
-      `response=${proxy.maxResponseBodyBytes}B manifest=${proxy.maxChunkManifestEntries} entries` +
+      `response=${proxy.maxResponseBodyBytes}B manifest=${proxy.maxChunkManifestEntries} entries ` +
+      `store=${configuration.maximumStoredBytes === undefined ? "unbounded" : `${configuration.maximumStoredBytes}B`}` +
       (constrained ? "; a full-size exchange may be marked incomplete" : ""),
   };
 }

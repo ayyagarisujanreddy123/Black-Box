@@ -150,6 +150,12 @@ export class SessionRepository {
       );
     }
 
+    if (existing.status === "imported-readonly") {
+      throw new ImmutableEvidenceError(
+        `Imported session ${session.id} is read-only.`,
+      );
+    }
+
     if (
       existing.startedAt !== session.startedAt ||
       existing.captureLevel !== session.captureLevel
@@ -188,6 +194,22 @@ export class SessionRepository {
     }
 
     return this.getRequired(session.id);
+  }
+
+  remove(id: string): Session {
+    const session = this.getRequired(id);
+    if (session.status === "active") {
+      throw new ImmutableEvidenceError(
+        `Active session ${id} cannot be deleted.`,
+      );
+    }
+    const result = this.database
+      .prepare("DELETE FROM sessions WHERE id = ?")
+      .run(id);
+    if (result.changes !== 1) {
+      throw new ImmutableEvidenceError(`Session ${id} was not deleted.`);
+    }
+    return session;
   }
 
   get(id: string): Session | undefined {

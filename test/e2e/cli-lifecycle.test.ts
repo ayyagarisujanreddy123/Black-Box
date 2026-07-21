@@ -21,6 +21,12 @@ const execute = promisify(execFile);
 const cliPath = fileURLToPath(
   new URL("../../apps/cli/dist/bin.js", import.meta.url),
 );
+const offlineDemoPath = fileURLToPath(
+  new URL("../../demo/scripts/run-offline.mjs", import.meta.url),
+);
+const resetDemoPath = fileURLToPath(
+  new URL("../../demo/scripts/reset.mjs", import.meta.url),
+);
 
 interface HttpResult {
   readonly status: number;
@@ -386,6 +392,33 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     }
     expect(wrappedInspection).toBeDefined();
 
+    const packagedReportCommand = await runCli([
+      "report",
+      wrappedOutput.sessionId,
+      "--home",
+      root,
+      "--json",
+    ]);
+    expect(packagedReportCommand.stderr).toBe("");
+    const packagedReport = JSON.parse(packagedReportCommand.stdout) as {
+      requestedMode: string;
+      report: {
+        targetEventId?: string;
+        analysis: { mode: string; externalEvidenceSent: boolean };
+      };
+      aiAttempt: { status: string };
+      markdown: string;
+    };
+    expect(packagedReport).toMatchObject({
+      requestedMode: "deterministic",
+      report: {
+        analysis: { mode: "deterministic", externalEvidenceSent: false },
+      },
+      aiAttempt: { status: "not-requested" },
+    });
+    expect(packagedReport.report.targetEventId).toBeDefined();
+    expect(packagedReport.markdown).toContain("# Black Box Incident Report");
+
     const stopped = await runCli(["stop", "--home", root]);
     expect(stopped.stderr).toBe("");
     expect(stopped.stdout).toContain("daemon stopped");
@@ -501,5 +534,47 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+it("runs the packaged offline fallback demo twice from a clean reset", async () => {
+  const outputRoot = await mkdtemp(
+    join(tmpdir(), "blackbox-demo-packaged-e2e-"),
+  );
+  try {
+    for (let run = 0; run < 2; run += 1) {
+      const result = await execute(
+        process.execPath,
+        [offlineDemoPath, "--output", outputRoot],
+        {
+          encoding: "utf8",
+          env: { ...process.env, NO_PROXY: "*", no_proxy: "*" },
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      expect(result.stdout).toContain("# Black Box Incident Report");
+      expect(result.stdout).toContain("event-read-result");
+      expect(result.stderr).toContain("Offline fixture ready");
+      await expect(
+        readFile(join(outputRoot, "incident-report.md"), "utf8"),
+      ).resolves.toContain("# Black Box Incident Report");
+      await expect(
+        readFile(join(outputRoot, "incident-report.json"), "utf8"),
+      ).resolves.toContain('"schemaVersion": 1');
+      await expect(
+        readFile(
+          join(outputRoot, "rogue-repo", "test", "math.test.js"),
+          "utf8",
+        ),
+      ).resolves.toContain("adds two numbers");
+    }
+  } finally {
+    await execute(process.execPath, [
+      resetDemoPath,
+      "--output",
+      outputRoot,
+      "--clean",
+    ]).catch(() => undefined);
+    await rm(outputRoot, { recursive: true, force: true });
   }
 });

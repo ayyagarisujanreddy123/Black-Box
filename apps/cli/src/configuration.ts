@@ -16,6 +16,11 @@ export type CliCommand =
   | "doctor"
   | "sessions"
   | "inspect"
+  | "report"
+  | "export"
+  | "import"
+  | "delete"
+  | "prune"
   | "run";
 
 export interface ParsedCliArguments {
@@ -30,6 +35,7 @@ export interface ResolvedStartConfiguration {
   readonly proxy: ProxyConfiguration;
   readonly controlHost: string;
   readonly controlPort: number;
+  readonly maximumStoredBytes?: number;
   readonly shutdownGraceMilliseconds: number;
   readonly readinessTimeoutMilliseconds: number;
 }
@@ -43,6 +49,11 @@ const COMMANDS = new Set<CliCommand>([
   "doctor",
   "sessions",
   "inspect",
+  "report",
+  "export",
+  "import",
+  "delete",
+  "prune",
   "run",
 ]);
 
@@ -58,6 +69,7 @@ const START_FLAGS = [
   "max-response-body-bytes",
   "max-chunk-manifest-entries",
   "upstream-timeout-ms",
+  "max-stored-bytes",
   "shutdown-grace-ms",
   "timeout-ms",
   "allow-non-loopback",
@@ -85,6 +97,12 @@ const VALUE_FLAGS = new Set([
   "max-untracked-file-bytes",
   "watcher-debounce-ms",
   "cleanup-timeout-ms",
+  "target-event",
+  "output",
+  "profile",
+  "max-bytes",
+  "older-than-days",
+  "max-stored-bytes",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -92,6 +110,9 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "websocket",
   "include-internal",
+  "ai",
+  "force",
+  "yes",
 ]);
 
 const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
@@ -111,6 +132,7 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
     "max-request-body-bytes",
     "max-response-body-bytes",
     "max-chunk-manifest-entries",
+    "max-stored-bytes",
     "upstream-timeout-ms",
     "allow-non-loopback",
     "json",
@@ -118,6 +140,11 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   ]),
   sessions: new Set(["home", "limit", "json", "include-internal"]),
   inspect: new Set(["home", "limit", "type", "cursor", "json"]),
+  report: new Set(["home", "target-event", "json", "ai"]),
+  export: new Set(["home", "output", "profile", "max-bytes", "force", "json"]),
+  import: new Set(["home", "max-bytes", "json"]),
+  delete: new Set(["home", "yes", "json"]),
+  prune: new Set(["home", "older-than-days", "max-bytes", "yes", "json"]),
   run: new Set([
     ...START_FLAGS,
     "cwd",
@@ -218,9 +245,13 @@ export function parseCliArguments(
     if (!help && (!separatorFound || positionals.length === 0)) {
       throw new CliUsageError("run requires '--' followed by a command.");
     }
-  } else if (command === "inspect") {
+  } else if (
+    new Set(["inspect", "report", "export", "import", "delete"]).has(command)
+  ) {
     if (!help && positionals.length !== 1) {
-      throw new CliUsageError("inspect requires exactly one session ID.");
+      throw new CliUsageError(
+        `${command} requires exactly one ${command === "import" ? "archive path" : "session ID"}.`,
+      );
     }
   } else if (command === "open") {
     if (!help && positionals.length > 1) {
@@ -333,6 +364,17 @@ export function resolveStartConfiguration(
     proxy,
     controlHost,
     controlPort: integerFlag(flags, "control-port", 4142, 0, 65_535),
+    ...(stringFlag(flags, "max-stored-bytes") === undefined
+      ? {}
+      : {
+          maximumStoredBytes: integerFlag(
+            flags,
+            "max-stored-bytes",
+            1,
+            1,
+            Number.MAX_SAFE_INTEGER,
+          ),
+        }),
     shutdownGraceMilliseconds: integerFlag(
       flags,
       "shutdown-grace-ms",

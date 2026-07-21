@@ -28,6 +28,7 @@ import {
   BlobCorruptionError,
   ChunkManifestBuilder,
   ChunkManifestSchema,
+  LATEST_SCHEMA_VERSION,
   MigrationError,
   StorageCapacityError,
   StorageCompatibilityError,
@@ -165,7 +166,7 @@ describe("database lifecycle and migrations", () => {
     const databaseMode = (await stat(storage.databasePath)).mode & 0o777;
     const dataMode = (await stat(storage.dataDirectory)).mode & 0o777;
 
-    expect(storage.schemaVersion).toBe(1);
+    expect(storage.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
     expect(
       storage.unsafeDatabase.pragma("journal_mode", { simple: true }),
     ).toBe("wal");
@@ -727,6 +728,72 @@ describe("repositories, recovery, and stable ordering", () => {
     expect(storage.analysisRuns.get("analysis-1")?.status).toBe("completed");
     expect(storage.redactions.listForSession("session-storage")).toHaveLength(
       1,
+    );
+  });
+
+  it("enforces imported session immutability while allowing explicit deletion", async () => {
+    const { storage } = await openTestStorage();
+    storage.sessions.create(session());
+    storage.events.insert(event("event-imported", "session-storage", 1));
+    const current = storage.sessions.getRequired("session-storage");
+    storage.sessions.replace({
+      ...current,
+      endedAt: LATER,
+      status: "imported-readonly",
+      metadata: { importedReadOnly: true },
+    });
+
+    expect(() =>
+      storage.events.insert(
+        event("event-imported-write", "session-storage", 2),
+      ),
+    ).toThrow("imported session is read-only");
+    expect(() =>
+      storage.sessions.replace({
+        ...storage.sessions.getRequired("session-storage"),
+        tags: ["changed"],
+      }),
+    ).toThrow("read-only");
+    expect(() =>
+      storage.unsafeDatabase
+        .prepare("UPDATE events SET summary_json = '{}' WHERE id = ?")
+        .run("event-imported"),
+    ).toThrow("imported session is read-only");
+    expect(() =>
+      storage.unsafeDatabase
+        .prepare("DELETE FROM events WHERE id = ?")
+        .run("event-imported"),
+    ).toThrow("imported session is read-only");
+    expect(storage.sessions.remove("session-storage").status).toBe(
+      "imported-readonly",
+    );
+    expect(storage.sessions.get("session-storage")).toBeUndefined();
+  });
+
+  it("garbage-collects only blobs that have no evidence references", async () => {
+    const { storage } = await openTestStorage();
+    storage.sessions.create(session());
+    const retained = await storage.blobs.put("retained", {
+      mediaType: "text/plain",
+    });
+    const orphan = await storage.blobs.put("orphan", {
+      mediaType: "text/plain",
+    });
+    const deferredOrphan = await storage.blobs.put("deferred orphan", {
+      mediaType: "text/plain",
+    });
+    storage.events.insert({
+      ...event("event-with-blob", "session-storage", 1),
+      payloadRef: retained,
+    });
+
+    const result = await storage.blobs.removeUnreferenced([orphan.id]);
+    expect(result.removedBlobs).toBe(1);
+    expect(storage.blobs.describe(orphan.id)).toBeUndefined();
+    expect(storage.blobs.describe(deferredOrphan.id)).toBeDefined();
+    expect(storage.blobs.describe(retained.id)).toBeDefined();
+    await expect(storage.blobs.get(retained.id)).resolves.toEqual(
+      Buffer.from("retained"),
     );
   });
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { AiReportProvider } from "@blackbox/analysis";
 import {
   openBlackBoxStorage,
   type BlackBoxStorage,
@@ -37,6 +38,7 @@ export interface BlackBoxDaemonOptions {
   };
   readonly blobStore?: BlobStoreOptions;
   readonly viewerDirectory?: string;
+  readonly aiReportProvider?: AiReportProvider;
   readonly shutdownGraceMilliseconds?: number;
   readonly now?: () => Date;
 }
@@ -187,7 +189,12 @@ export class BlackBoxDaemon {
         token,
         status: () => this.status(),
         shutdown: () => this.stop(),
-        query: new EvidenceQueryService(this.storageValue),
+        query: new EvidenceQueryService(this.storageValue, {
+          ...(this.options.aiReportProvider === undefined
+            ? {}
+            : { aiReportProvider: this.options.aiReportProvider }),
+          now: () => this.now(),
+        }),
         ...(viewerAssets === undefined ? {} : { viewerAssets }),
         ...this.options.control,
       });

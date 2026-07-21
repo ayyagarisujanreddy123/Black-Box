@@ -1,4 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -28,6 +33,12 @@ const testFileUrl = new URL(
   "../../../demo/rogue-repo-template/test/math.test.js",
   import.meta.url,
 );
+const resetScriptUrl = new URL(
+  "../../../demo/scripts/reset.mjs",
+  import.meta.url,
+);
+const resetScriptPath = fileURLToPath(resetScriptUrl);
+const execute = promisify(execFile);
 
 async function loadTranscript(): Promise<RogueTranscript> {
   const contents = await readFile(transcriptUrl, "utf8");
@@ -72,5 +83,42 @@ describe("deterministic rogue demo fixture", () => {
     expect(readResult?.summary.content).toBe(readmeLines[6]);
     expect(deletion?.type).toBe("file.delete");
     expect(deletion?.summary.path).toBe("test/math.test.js");
+  });
+
+  it("resets and cleans the offline demo repeatedly", async () => {
+    const outputRoot = await mkdtemp(
+      join(tmpdir(), "blackbox-demo-reset-test-"),
+    );
+    try {
+      for (let run = 0; run < 2; run += 1) {
+        const result = await execute(
+          process.execPath,
+          [resetScriptPath, "--output", outputRoot],
+          { encoding: "utf8" },
+        );
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          outputRoot,
+          cleaned: false,
+        });
+        await expect(
+          readFile(
+            join(outputRoot, "rogue-repo", "test", "math.test.js"),
+            "utf8",
+          ),
+        ).resolves.toContain("adds two numbers");
+        await expect(
+          stat(join(outputRoot, "rogue-repo", ".git")),
+        ).resolves.toMatchObject({});
+      }
+      const cleaned = await execute(
+        process.execPath,
+        [resetScriptPath, "--output", outputRoot, "--clean"],
+        { encoding: "utf8" },
+      );
+      expect(JSON.parse(cleaned.stdout)).toMatchObject({ cleaned: true });
+      await expect(stat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(outputRoot, { recursive: true, force: true });
+    }
   });
 });

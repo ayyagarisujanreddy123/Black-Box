@@ -1,3 +1,4 @@
+export * from "./archive.js";
 export * from "./blame.js";
 export * from "./common.js";
 export * from "./context.js";

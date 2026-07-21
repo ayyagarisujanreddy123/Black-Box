@@ -43,6 +43,12 @@ export interface PutBlobOptions {
   readonly truncated?: boolean;
 }
 
+export interface BlobGarbageCollectionResult {
+  readonly removedBlobs: number;
+  readonly removedStoredBytes: number;
+  readonly removedExternalFiles: number;
+}
+
 export type BlobLocation =
   | { readonly kind: "inline" }
   | { readonly kind: "external"; readonly path: string };
@@ -318,6 +324,85 @@ export class BlobStore {
     );
     await Promise.all(temporaryFiles.map((path) => rm(path, { force: true })));
     return temporaryFiles.length;
+  }
+
+  async removeUnreferenced(
+    candidateIds?: readonly string[],
+  ): Promise<BlobGarbageCollectionResult> {
+    const requested =
+      candidateIds === undefined ? undefined : new Set(candidateIds);
+    const candidates = (
+      this.database
+        .prepare(
+          `SELECT id
+         FROM blobs
+         WHERE NOT EXISTS (
+           SELECT 1 FROM raw_exchanges
+           WHERE request_blob_id = blobs.id
+              OR response_blob_id = blobs.id
+              OR stream_manifest_blob_id = blobs.id
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM events WHERE payload_blob_id = blobs.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM file_changes WHERE patch_blob_id = blobs.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM analysis_runs WHERE result_blob_id = blobs.id
+           )
+         ORDER BY id`,
+        )
+        .all() as Array<{ id: string }>
+    ).filter((candidate) => requested?.has(candidate.id) ?? true);
+    const removed = this.database.transaction(() => {
+      const rows: Array<{
+        relative_path: string | null;
+        stored_length: number;
+      }> = [];
+      const statement = this.database.prepare(
+        `DELETE FROM blobs
+         WHERE id = @id
+           AND NOT EXISTS (
+             SELECT 1 FROM raw_exchanges
+             WHERE request_blob_id = blobs.id
+                OR response_blob_id = blobs.id
+                OR stream_manifest_blob_id = blobs.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM events WHERE payload_blob_id = blobs.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM file_changes WHERE patch_blob_id = blobs.id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM analysis_runs WHERE result_blob_id = blobs.id
+           )
+         RETURNING relative_path, stored_length`,
+      );
+      for (const candidate of candidates) {
+        const row = statement.get(candidate) as
+          { relative_path: string | null; stored_length: number } | undefined;
+        if (row !== undefined) {
+          rows.push(row);
+        }
+      }
+      return rows;
+    })();
+    const externalPaths = removed.flatMap((row) =>
+      row.relative_path === null
+        ? []
+        : [this.safeExternalPath(row.relative_path)],
+    );
+    await Promise.all(externalPaths.map((path) => rm(path, { force: true })));
+    return {
+      removedBlobs: removed.length,
+      removedStoredBytes: removed.reduce(
+        (total, row) => total + row.stored_length,
+        0,
+      ),
+      removedExternalFiles: externalPaths.length,
+    };
   }
 
   private assertWithinQuota(additionalBytes: number): void {

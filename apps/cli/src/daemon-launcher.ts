@@ -35,6 +35,9 @@ export function daemonWorkerArguments(
     String(proxy.maxChunkManifestEntries),
     "--shutdown-grace-ms",
     String(configuration.shutdownGraceMilliseconds),
+    ...(configuration.maximumStoredBytes === undefined
+      ? []
+      : ["--max-stored-bytes", String(configuration.maximumStoredBytes)]),
     ...(proxy.allowNonLoopback ? ["--allow-non-loopback"] : []),
     ...(proxy.upstreamTimeoutMs === undefined
       ? []
@@ -59,6 +62,10 @@ function daemonEnvironment(): NodeJS.ProcessEnv {
     "NODE_EXTRA_CA_CERTS",
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
+    "BLACKBOX_ANALYSIS_API_KEY",
+    "BLACKBOX_ANALYSIS_MODEL",
+    "BLACKBOX_ANALYSIS_BASE_URL",
+    "BLACKBOX_ANALYSIS_PROVIDER",
   ];
   const environment: NodeJS.ProcessEnv = { BLACKBOX_DAEMON_CHILD: "1" };
   for (const name of names) {

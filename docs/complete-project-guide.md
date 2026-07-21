@@ -1433,6 +1433,7 @@ These are future directions, not 0.1.0 capabilities.
 - [Technical design](../design.md) — complete product/architecture design
 - [Execution plan](../plan.md) — milestone tasks and acceptance criteria
 - [Capture model](capture-model.md) — capture levels, time precision, evidence kinds
+- [Adapter authoring](adapter-authoring.md) — supported session integration contract and limits
 - [Protocol support](protocol-support.md) — supported routes/transports and fidelity boundaries
 - [Privacy guide](privacy.md) — stored data, credentials, network behavior, deletion
 - [Archive format](archive-format.md) — exact `.bbx` schema and verification

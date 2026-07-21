@@ -8,7 +8,7 @@ Black Box reports only evidence it can observe. A capture level describes the in
 | L2    | `wrapped-process` | `blackbox run -- <command>`           | L1 plus process identity, bounded output, exit state, baseline/final diff and approximate file observations | Agent-internal tool semantics not visible through its API or process             |
 | L3    | `adapter`         | Agent-specific adapter or hook        | Evidence explicitly emitted by that integration, potentially including tool lifecycle and approvals         | Provider-hidden prompts, remote state and private model reasoning                |
 
-L2 is the recommended built-in path. The L3 protocol value exists for integrations, but this repository currently provides only an adapter foundation—not a bundled agent-specific adapter.
+L2 is the recommended built-in path. The L3 protocol value exists for integrations, but this repository currently provides only an adapter foundation—not a bundled agent-specific adapter. See [Adapter authoring](adapter-authoring.md) for the supported 0.1 session integration contract and its limits.
 
 ## Time and filesystem precision
 

@@ -558,6 +558,7 @@ For the detailed product contract and milestone acceptance criteria, see:
 - [design.md](./design.md)
 - [plan.md](./plan.md)
 - [Capture model](./docs/capture-model.md)
+- [Adapter authoring](./docs/adapter-authoring.md)
 - [Protocol support](./docs/protocol-support.md)
 - [Archive format](./docs/archive-format.md)
 - [Three- and seven-minute demo script](./docs/demo-script.md)

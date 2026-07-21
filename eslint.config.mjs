@@ -8,6 +8,7 @@ export default tseslint.config(
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
+      ".blackbox-demo/**",
       "coverage/**",
       "demo/rogue-repo-template/**",
     ],

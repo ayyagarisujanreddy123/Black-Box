@@ -52,22 +52,22 @@ captured user evidence in this file.
 
 ## State at this checkpoint
 
-Snapshot date: 2026-07-20 in America/Los_Angeles. The automated preflight finished
-at 2026-07-21T06:50:15Z.
+Snapshot date: 2026-07-21 in America/Los_Angeles. The final automated preflight
+before this memory refresh finished at 2026-07-21T07:26:19.112Z.
 
 - Workspace: /Applications/Projects/BlackBox. On this case-insensitive macOS volume
   the path can display as /Applications/projects/BlackBox.
 - Branch: main.
-- Baseline HEAD before this memory commit:
-  458c3ed9f7ca2e2122888668cb70bf6ef6c63c1a.
-- Baseline summary: build: exclude disposable demo output from lint.
+- Candidate HEAD before this memory refresh:
+  9dc8850fa05d6392801d0058e81c1f9a8523b34a.
+- Candidate summary: build: pin reviewed dependency install scripts.
 - origin/main: 50e4662, docs: restore original terminal banner font.
-- Before this memory commit, local main was 13 commits ahead and 0 behind
+- Before this memory refresh, local main was 22 commits ahead and 0 behind
   origin/main.
 - The branch did not show an upstream association in git branch -vv. Use the
   explicit command git push origin main only after authorization.
-- The tree was clean before this file was created.
-- This file is intended to be the next local commit, making main 14 commits ahead
+- The tree was clean before this memory refresh.
+- This file is intended to be the next local commit, making main 23 commits ahead
   if external state has not changed. Always verify.
 - Remote: https://github.com/ayyagarisujanreddy123/Black-Box.git
 - GitHub repository: ayyagarisujanreddy123/Black-Box
@@ -76,21 +76,32 @@ at 2026-07-21T06:50:15Z.
 - No Git tags existed.
 - Node: v22.20.0
 - npm: 10.9.3
-- Root engine requirement: Node >=22.13.0
+- Root engine requirement: Node >=22.15.0
 - Root package: blackbox 0.1.0, intentionally private.
 - npm whoami returned E401 Unauthorized; npm is not logged in.
 - npm view for @blackbox/cli and @blackbox/protocol returned E404. This means those
   packages were unpublished at that moment. It does not prove the user controls the
   @blackbox npm scope.
-- No npm publishing workflow exists.
-- .github/workflows/ci.yml has no publish credentials or deployment job.
+- A guarded, manually dispatched first-publication workflow now exists at
+  .github/workflows/bootstrap-npm.yml. It uses the protected npm-production
+  environment and cannot pass preflight while the seven release locks remain.
+- .github/workflows/ci.yml still has no publish credentials or deployment job.
 - Codex created no npm token or GitHub publishing secret.
 - Nothing was pushed, tagged, or published while making this checkpoint.
 
 ## Recent completed local commits
 
-These commits are after origin/main:
+These commits are after origin/main, newest first:
 
+    9dc8850 build: pin reviewed dependency install scripts
+    73aa9cf docs: update candidate test count
+    38d71d3 docs: record fixed-candidate performance
+    3ceb53a fix(storage): require a zstd-capable Node runtime
+    079660c docs: refresh candidate performance measurements
+    fbf8504 ci(release): add guarded npm bootstrap workflow
+    efb9279 build: enforce runtime release documentation
+    20e4c73 docs(packages): document all runtime components
+    1fbf4d4 docs: save project handoff memory
     458c3ed build: exclude disposable demo output from lint
     2319a7e docs: refresh candidate validation measurements
     cad4eed test: close the security verification checklist
@@ -104,6 +115,26 @@ These commits are after origin/main:
     f222e11 build: verify installable runtime packages
     7d5ef21 ci: add cross-platform release gates
     b6e0e07 feat: complete incident reports and release hardening
+
+The 2026-07-21 completion pass also established these facts:
+
+- Every runtime package has an npm-facing package-local README, and both package
+  smoke testing and release preflight require all seven.
+- Release preflight proves that the root and all four development-only workspaces
+  remain private.
+- Node 22.13 could not provide the Zstandard APIs used by storage. The minimum was
+  corrected to Node 22.15, storage now fails before creating files on an
+  unsupported runtime, and doctor reports the incompatibility explicitly.
+- Node 22.15 passed the build and all 279 tests. Node 24.18 with npm 11.18 passed a
+  clean install, all tests, both end-to-end tests, and every packed-package smoke
+  check.
+- npm 11's strict lifecycle-script policy is supported through an exact reviewed
+  allowlist for better-sqlite3 12.11.1 and fsevents 2.3.3. The bootstrap workflow
+  installs with --strict-allow-scripts.
+- npm audit reported zero vulnerabilities, and npm audit signatures verified 178
+  registry signatures and 52 attestations.
+- The fixed-candidate performance record is in docs/performance.md and is tied to
+  source commit 3ceb53a89f2d898917a447554096394be1608dcf.
 
 ## What Black Box is
 
@@ -202,7 +233,7 @@ scripts/runtime-packages.mjs and must currently publish in this order:
 7. @blackbox/cli at apps/cli
 
 All seven are version 0.1.0, use exact internal 0.1.0 dependencies, declare Node
->=22.13.0, use Apache-2.0, have explicit file allowlists, and set
+>=22.15.0, use Apache-2.0, have explicit file allowlists, and set
 publishConfig.access to public. The CLI binary is blackbox at ./dist/bin.js.
 
 Dependency graph:
@@ -225,7 +256,7 @@ These development workspaces must stay private and must not be published:
 
 ## Exact preflight result
 
-At baseline commit 458c3ed, this was run:
+At candidate commit 9dc8850, this was run:
 
     npm run --silent release:preflight -- --json
 
@@ -237,10 +268,12 @@ It rebuilt and tested the project. Result: ready false for one deliberate blocke
     PASS candidate-version        0.1.0
     PASS version-alignment        7 package versions match 0.1.0
     FAIL publishable-packages     7 runtime packages are still private
+    PASS private-development-workspaces
+                                 5 non-runtime workspaces remain protected
     PASS license                  Apache-2.0 across release set
     PASS repository-metadata      correct GitHub repository URL
     PASS publish-configuration    scoped packages use public access
-    PASS cli-readme               package-local CLI README present
+    PASS package-readmes          7 package-local READMEs are present
     PASS clean-tree               candidate tree clean
 
 The only failing packages were the seven runtime packages. Their private flags are
@@ -249,22 +282,19 @@ npm scope ownership is confirmed.
 
 ## Current public-package documentation state
 
-Package-local READMEs present:
-
-- packages/storage/README.md
-- apps/cli/README.md
-
-Package-local READMEs missing and recommended before publication:
+Package-local READMEs are present for all seven runtime packages:
 
 - packages/protocol/README.md
+- packages/storage/README.md
 - packages/normalizers/README.md
 - packages/context/README.md
 - packages/analysis/README.md
 - apps/daemon/README.md
+- apps/cli/README.md
 
-Each support README should explain its role, say it is mainly a Black Box runtime
-component, direct normal users to @blackbox/cli, and link to the repository, license,
-and security policy.
+Each explains its runtime role, directs normal users to @blackbox/cli where
+appropriate, and links to the repository, license, and security policy. Packed
+artifacts include the correct package README.
 
 Release-candidate wording remains in README.md, CHANGELOG.md,
 docs/release-checklist.md, docs/security-verification.md,
@@ -335,7 +365,9 @@ publish. The one-time protected workflow is recommended.
 
 ## Exact next local work after scope confirmation
 
-Commit 1: remove private true from exactly:
+The runtime documentation, guarded bootstrap workflow, release runbook, and local
+quality gates are complete. After npm identity and @blackbox write access are
+confirmed, remove private true from exactly:
 
 - packages/protocol/package.json
 - packages/storage/package.json
@@ -345,35 +377,22 @@ Commit 1: remove private true from exactly:
 - apps/daemon/package.json
 - apps/cli/package.json
 
-Leave root and development-only workspaces private.
-
-Suggested message:
+Leave root and development-only workspaces private. Suggested message:
 
     chore(release): make runtime packages publishable
 
-Commit 2:
-
-- Add the five missing package READMEs.
-- Remove registry-publication-deferred copy from apps/cli/README.md.
-- Make npm installation the production path while retaining source instructions.
-- Replace source-candidate/deferred wording.
-- Add the actual 0.1.0 release date to CHANGELOG.md.
-- Preserve privacy, supported-protocol, capture-level, and limitations claims.
+Then remove registry-publication-deferred/source-candidate wording, make npm
+installation the production path while retaining source instructions, and add the
+actual 0.1.0 release date to CHANGELOG.md. Preserve privacy, supported-protocol,
+capture-level, and limitations claims.
 
 Suggested message:
 
     docs(release): prepare package documentation for 0.1.0
 
-Commit 3: add .github/workflows/bootstrap-npm.yml with manual dispatch,
-contents read permission, id-token write permission, protected npm-production
-environment, full validation, and sequential npm publication under next.
-
-Suggested message:
-
-    ci(release): add npm bootstrap publishing workflow
-
-Never put token text in the workflow. It may only reference the protected
-NPM_TOKEN GitHub secret after the user creates it.
+Do not recreate the bootstrap workflow: it is already committed. Never put token
+text in it. It may only reference the protected NPM_TOKEN GitHub environment secret
+after the user creates that short-lived credential.
 
 Then run:
 
@@ -418,8 +437,11 @@ and npm requirements can change. The planned workflow should:
     npm publish --workspace=@blackbox/daemon --access public --tag next --provenance
     npm publish --workspace=@blackbox/cli --access public --tag next --provenance
 
-Current CI pins actions/checkout@v6.0.2 and actions/setup-node@v6.4.0. Pin the release
-workflow consistently after verifying supported current versions.
+The committed workflow pins actions/checkout@v6.0.2, actions/setup-node@v6.4.0,
+Node 24, and npm 11.18.0. It requires the exact approved full SHA and confirmation
+phrase, runs all gates with strict lifecycle-script handling, refuses existing or
+ambiguously unavailable package versions, and publishes dependencies first with
+provenance under next.
 
 Never blindly rerun a partially successful publication. Inspect every registry
 package first.
@@ -434,7 +456,7 @@ Push and CI:
     git push origin main
 
 Record the exact SHA. Wait for .github/workflows/ci.yml on that SHA. It currently
-tests quality on Ubuntu Node 22.20, minimum compatibility on Ubuntu Node 22.13, and
+tests quality on Ubuntu Node 22.20, minimum compatibility on Ubuntu Node 22.15, and
 the packed lifecycle on Ubuntu, macOS, and Windows. Do not publish with a pending,
 cancelled, unexpectedly skipped, or failing job.
 
@@ -484,7 +506,7 @@ Promote dependencies and CLI last:
     npm dist-tag add @blackbox/cli@0.1.0 latest
 
 Verify a normal install, then create the GitHub release for v0.1.0. Release notes
-must include purpose, global npm install, quickstart, Node >=22.13.0, highlights,
+must include purpose, global npm install, quickstart, Node >=22.15.0, highlights,
 supported protocols/capture levels, privacy warning, limitations, changelog, and
 security/documentation links. Never attach real .bbx evidence, databases,
 credentials, recordings, or machine-specific configuration.
@@ -568,7 +590,8 @@ dependencies. Release preflight is the final alignment authority.
 ## Best next move
 
 On resume, first help the user log in to npm and verify ownership/write access for
-@blackbox. If ownership is confirmed, implement the three focused local
-release-preparation commits above, run the complete preflight until it says READY,
-and stop before any push, tag, token, package setting, or publication unless the
-user explicitly authorizes those external actions.
+@blackbox. If ownership is confirmed, remove only the seven runtime private locks,
+finalize the genuine-release wording/date, run the complete preflight until it says
+READY, and make focused local commits. Stop before any push, tag, token, package
+setting, workflow dispatch, or publication unless the user explicitly authorizes
+those external actions.

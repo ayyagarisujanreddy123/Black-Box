@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Local flight recorder for AI coding agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git"
+  },
+  "homepage": "https://github.com/ayyagarisujanreddy123/Black-Box#readme",
+  "bugs": {
+    "url": "https://github.com/ayyagarisujanreddy123/Black-Box/issues"
+  },
   "type": "module",
   "workspaces": [
     "apps/*",

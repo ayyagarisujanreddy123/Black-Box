@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Local capture, query, archive, and analysis service for Black Box",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
+    "directory": "apps/daemon"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

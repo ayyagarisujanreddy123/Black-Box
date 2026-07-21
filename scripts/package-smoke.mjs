@@ -50,6 +50,7 @@ function validatePackageContents(result) {
   );
 
   if (result.name === "@blackbox/cli") {
+    assert.ok(paths.includes("README.md"), "CLI lacks its package README");
     assert.ok(paths.includes("dist/bin.js"), "CLI lacks its executable");
     assert.ok(
       paths.includes("dist/viewer/index.html"),

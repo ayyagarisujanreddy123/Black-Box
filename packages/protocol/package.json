@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Versioned evidence and query contracts for Black Box",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
+    "directory": "packages/protocol"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

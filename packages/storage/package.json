@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Crash-safe SQLite evidence journal and blob store for Black Box",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
+    "directory": "packages/storage"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

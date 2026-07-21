@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Client-visible model context reconstruction for Black Box",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
+    "directory": "packages/context"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

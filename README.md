@@ -554,6 +554,7 @@ This is not a claim that a public package release is complete. Cross-platform cl
 
 For the detailed product contract and milestone acceptance criteria, see:
 
+- [Complete project guide](./docs/complete-project-guide.md)
 - [design.md](./design.md)
 - [plan.md](./plan.md)
 - [Capture model](./docs/capture-model.md)

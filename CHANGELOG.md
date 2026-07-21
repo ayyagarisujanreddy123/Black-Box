@@ -26,6 +26,7 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 
 - Corrected the minimum Node.js requirement to 22.15.0, the first 22.x release with the Zstandard APIs required by the evidence blob store, and added an explicit `doctor` runtime check.
 - Made `blackbox doctor` report unsupported POSIX permission-mode verification as a warning on Windows instead of failing an otherwise healthy installation.
+- Made package smoke testing and release preflight invoke JavaScript entrypoints directly so Windows does not attempt to execute npm-generated `.cmd` shims through `execFile`.
 
 ### Known limitations
 

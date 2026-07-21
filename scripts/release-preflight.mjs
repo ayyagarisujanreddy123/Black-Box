@@ -8,7 +8,7 @@ import { runtimePackages } from "./runtime-packages.mjs";
 
 const execute = promisify(execFile);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCliPath = process.env.npm_execpath;
 const gitExecutable = "git";
 const maximumOutputBytes = 100 * 1024 * 1024;
 const privateWorkspaceDirectories = [
@@ -60,7 +60,15 @@ function outputTail(value) {
 async function commandCheck(id, label, arguments_) {
   process.stderr.write(`Checking ${label.toLowerCase()}...\n`);
   try {
-    await execute(npmExecutable, arguments_, {
+    if (npmCliPath === undefined) {
+      throw Object.assign(
+        new Error(
+          "npm_execpath is unavailable; run release preflight through npm",
+        ),
+        { code: "ENPMEXEC" },
+      );
+    }
+    await execute(process.execPath, [npmCliPath, ...arguments_], {
       cwd: repositoryRoot,
       maxBuffer: maximumOutputBytes,
     });

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +18,7 @@ import { runtimePackages } from "./runtime-packages.mjs";
 
 const execute = promisify(execFile);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCliPath = process.env.npm_execpath;
 const runtimePackageNames = new Set(runtimePackages.map(({ name }) => name));
 const forbiddenPackagePaths = [
   /(^|\/)(?:src|test|tests|__tests__)(\/|$)/,
@@ -21,6 +28,14 @@ const forbiddenPackagePaths = [
   /(^|\/)(?:logs?)(\/|$)/,
   /\.(?:db|sqlite|sqlite3)(?:$|[.-])/,
 ];
+
+async function executeNpm(arguments_, options) {
+  assert.ok(
+    npmCliPath,
+    "npm_execpath is unavailable; run the package smoke test through npm",
+  );
+  return execute(process.execPath, [npmCliPath, ...arguments_], options);
+}
 
 function parsePackResult(stdout, packageName) {
   const parsed = JSON.parse(stdout);
@@ -160,8 +175,7 @@ async function run() {
     const results = [];
     const archives = [];
     for (const { name: packageName } of runtimePackages) {
-      const { stdout } = await execute(
-        npmExecutable,
+      const { stdout } = await executeNpm(
         [
           "pack",
           "--json",
@@ -182,8 +196,7 @@ async function run() {
       join(installDirectory, "package.json"),
       `${JSON.stringify({ name: "blackbox-package-smoke", private: true }, null, 2)}\n`,
     );
-    await execute(
-      npmExecutable,
+    await executeNpm(
       [
         "install",
         "--no-audit",
@@ -195,44 +208,51 @@ async function run() {
       { cwd: installDirectory, maxBuffer: 20 * 1024 * 1024 },
     );
 
-    const binary = join(
+    const binaryShim = join(
       installDirectory,
       "node_modules",
       ".bin",
       process.platform === "win32" ? "blackbox.cmd" : "blackbox",
     );
-    const help = await execute(binary, ["--help"], {
+    await access(binaryShim);
+    const installedCli = join(
+      installDirectory,
+      "node_modules",
+      "@blackbox",
+      "cli",
+      "dist",
+      "bin.js",
+    );
+    const help = await execute(process.execPath, [installedCli, "--help"], {
       cwd: installDirectory,
       maxBuffer: 20 * 1024 * 1024,
     });
     assert.match(help.stdout, /Usage:\s+blackbox/);
-    const version = await execute(binary, ["--version"], {
-      cwd: installDirectory,
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    const version = await execute(
+      process.execPath,
+      [installedCli, "--version"],
+      {
+        cwd: installDirectory,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+    );
     assert.equal(version.stdout.trim(), rootManifest.version);
 
-    const installedBin = await readFile(
-      join(
-        installDirectory,
-        "node_modules",
-        "@blackbox",
-        "cli",
-        "dist",
-        "bin.js",
-      ),
-      "utf8",
-    );
-    assert.ok(installedBin.startsWith("#!/usr/bin/env node\n"));
+    const installedBin = await readFile(installedCli, "utf8");
+    assert.match(installedBin, /^#!\/usr\/bin\/env node\r?\n/u);
 
     const blackBoxHome = join(temporaryRoot, "home");
-    await execute(binary, ["init", "--home", blackBoxHome], {
-      cwd: installDirectory,
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    await execute(
+      process.execPath,
+      [installedCli, "init", "--home", blackBoxHome],
+      {
+        cwd: installDirectory,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+    );
     const sessions = await execute(
-      binary,
-      ["sessions", "--home", blackBoxHome, "--json"],
+      process.execPath,
+      [installedCli, "sessions", "--home", blackBoxHome, "--json"],
       { cwd: installDirectory, maxBuffer: 20 * 1024 * 1024 },
     );
     assert.deepEqual(JSON.parse(sessions.stdout), []);

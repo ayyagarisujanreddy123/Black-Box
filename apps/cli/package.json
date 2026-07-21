@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Local flight recorder and evidence cockpit for AI coding agents",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
@@ -21,6 +22,8 @@
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "dist/LICENSE",
+    "dist/THIRD_PARTY_NOTICES",
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.html",

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Versioned evidence and query contracts for Black Box",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git",
@@ -18,6 +19,7 @@
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "dist/LICENSE",
     "dist/**/*.js",
     "dist/**/*.d.ts"
   ],

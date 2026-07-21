@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Local flight recorder for AI coding agents",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ayyagarisujanreddy123/Black-Box.git"
@@ -23,7 +24,7 @@
   "scripts": {
     "blackbox": "node apps/cli/dist/bin.js",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
-    "build": "tsc -b --pretty false && npm run build:assets --workspace @blackbox/viewer",
+    "build": "tsc -b --pretty false && npm run build:assets --workspace @blackbox/viewer && node scripts/package-license.mjs",
     "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run test:e2e",
     "clean": "tsc -b --clean",
     "demo:cleanup": "node demo/scripts/reset.mjs --clean",

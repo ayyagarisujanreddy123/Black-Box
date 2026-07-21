@@ -33,3 +33,5 @@ Deterministic inspection and reporting stay local. Optional AI report enrichment
 Recordings may contain prompts, source code, tool output, and credentials present in payload bodies. Protect the Black Box data directory and review the selected archive profile before sharing an export.
 
 For the complete quickstart, supported protocols, evidence model, privacy boundaries, and source-development instructions, read the [project documentation](https://github.com/ayyagarisujanreddy123/Black-Box#readme) and [security policy](https://github.com/ayyagarisujanreddy123/Black-Box/security/policy).
+
+Black Box is licensed under Apache-2.0. The full license text is included at `dist/LICENSE`, and notices for dependencies embedded in the browser assets are included at `dist/THIRD_PARTY_NOTICES`.

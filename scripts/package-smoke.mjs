@@ -40,6 +40,7 @@ function validatePackageContents(result) {
     );
   }
 
+  assert.ok(paths.includes("dist/LICENSE"), `${result.name} lacks its license`);
   assert.ok(
     paths.includes("dist/index.js"),
     `${result.name} lacks dist/index.js`,
@@ -51,6 +52,10 @@ function validatePackageContents(result) {
 
   if (result.name === "@blackbox/cli") {
     assert.ok(paths.includes("README.md"), "CLI lacks its package README");
+    assert.ok(
+      paths.includes("dist/THIRD_PARTY_NOTICES"),
+      "CLI lacks bundled dependency notices",
+    );
     assert.ok(paths.includes("dist/bin.js"), "CLI lacks its executable");
     assert.ok(
       paths.includes("dist/viewer/index.html"),
@@ -71,6 +76,8 @@ async function validatePackageManifests() {
   const rootManifest = JSON.parse(
     await readFile(join(repositoryRoot, "package.json"), "utf8"),
   );
+  const license = await readFile(join(repositoryRoot, "LICENSE"), "utf8");
+  assert.match(license, /Apache License\s+Version 2\.0, January 2004/);
   for (const runtimePackage of runtimePackages) {
     const manifest = JSON.parse(
       await readFile(
@@ -88,6 +95,19 @@ async function validatePackageManifests() {
       manifest.engines?.node,
       rootManifest.engines?.node,
       `${manifest.name} has a different Node.js compatibility contract`,
+    );
+    assert.equal(
+      manifest.license,
+      rootManifest.license,
+      `${manifest.name} has a different license declaration`,
+    );
+    assert.equal(
+      await readFile(
+        join(repositoryRoot, runtimePackage.directory, "dist", "LICENSE"),
+        "utf8",
+      ),
+      license,
+      `${manifest.name} does not package the canonical license text`,
     );
     assert.ok(
       typeof manifest.description === "string" &&

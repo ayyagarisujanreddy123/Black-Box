@@ -31,6 +31,7 @@ It runs the source gate, clean-installs the packed runtime set, audits dependenc
 - [ ] Confirm the demo repository still contains its test and both report artifacts were produced.
 - [ ] Confirm CI passed on Ubuntu, macOS and Windows for the exact candidate SHA.
 - [ ] Inspect the package tarballs from the package smoke test; reject secrets, local databases, logs, source maps, fixtures not intended for distribution, and missing runtime assets.
+- [ ] Confirm the CLI tarball contains the project license and generated notices for every dependency embedded in the browser assets.
 - [ ] Review `.bbx` share/forensic warnings, optional-AI consent copy, and supported/unsupported claims.
 - [ ] Record known limitations and migration compatibility.
 - [ ] Capture fallback screenshots/video from the exact candidate, if required for the release venue.

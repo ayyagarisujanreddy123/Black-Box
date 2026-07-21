@@ -557,4 +557,5 @@ For the detailed product contract and milestone acceptance criteria, see:
 - [Protocol support](./docs/protocol-support.md)
 - [Archive format](./docs/archive-format.md)
 - [Three- and seven-minute demo script](./docs/demo-script.md)
+- [Release checklist and CI boundaries](./docs/release-checklist.md)
 - [Architecture decisions](./docs/decisions/)

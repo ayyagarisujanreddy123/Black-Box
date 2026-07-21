@@ -29,6 +29,7 @@ import {
   requestDaemonStatus,
   resolveStartConfiguration,
   runCli,
+  runDoctor,
   type CliOutput,
   type CliRuntime,
   type ResolvedStartConfiguration,
@@ -1296,6 +1297,32 @@ describe("CLI doctor", () => {
         .checks,
     ).toContainEqual(
       expect.objectContaining({ id: "websocket-transport", status: "warn" }),
+    );
+
+    const windowsReport = await runDoctor(
+      resolveStartConfiguration(
+        parseCliArguments([
+          "doctor",
+          "--home",
+          root,
+          "--upstream",
+          upstreamOrigin,
+          "--proxy-port",
+          "0",
+          "--control-port",
+          "0",
+        ]).flags,
+        {},
+      ),
+      false,
+      "win32",
+    );
+    expect(windowsReport.ok).toBe(true);
+    expect(windowsReport.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "storage", status: "warn" }),
+        expect.objectContaining({ id: "control-token", status: "warn" }),
+      ]),
     );
 
     stdout.clear();

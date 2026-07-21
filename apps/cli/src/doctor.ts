@@ -74,6 +74,7 @@ function mode(value: number): string {
 
 async function storageCheck(
   configuration: ResolvedStartConfiguration,
+  platform: NodeJS.Platform,
 ): Promise<DoctorCheck> {
   const { paths } = configuration;
   const probePath = join(
@@ -88,6 +89,15 @@ async function storageCheck(
       await handle.sync();
     } finally {
       await handle.close();
+    }
+    if (platform === "win32") {
+      return {
+        id: "storage",
+        status: "warn",
+        message:
+          `${paths.dataDirectory} is writable; Windows does not expose ` +
+          "POSIX owner/group/other permission modes",
+      };
     }
     const homeMode = mode((await stat(paths.homeDirectory)).mode);
     const dataMode = mode((await stat(paths.dataDirectory)).mode);
@@ -116,9 +126,18 @@ async function storageCheck(
 
 async function tokenCheck(
   configuration: ResolvedStartConfiguration,
+  platform: NodeJS.Platform,
 ): Promise<DoctorCheck> {
   try {
     await readControlToken(configuration.paths.tokenPath);
+    if (platform === "win32") {
+      return {
+        id: "control-token",
+        status: "warn",
+        message:
+          "control token exists; Windows does not expose POSIX owner/group/other permission modes",
+      };
+    }
     const tokenMode = mode((await stat(configuration.paths.tokenPath)).mode);
     return tokenMode === "600"
       ? {
@@ -321,12 +340,13 @@ function captureLimitCheck(
 export async function runDoctor(
   configuration: ResolvedStartConfiguration,
   websocketRequired: boolean,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<DoctorReport> {
   const lock = await lockInspection(configuration);
   const checks: DoctorCheck[] = [
     nodeRuntimeCheck(),
-    await storageCheck(configuration),
-    await tokenCheck(configuration),
+    await storageCheck(configuration, platform),
+    await tokenCheck(configuration, platform),
     lock.check,
   ];
   checks.push(

@@ -14,7 +14,7 @@ Depending on capture level and configured bounds, the private Black Box home can
 - deterministic context, blame, anomaly and report results;
 - explicit optional-AI attempt metadata and the minimized snapshot used for that attempt.
 
-SQLite uses WAL mode and payloads use a content-addressed blob store. The home, token, database and exported archives are created with restrictive permissions where the host supports POSIX modes. Set the location with `--home` or `BLACKBOX_HOME`.
+SQLite uses WAL mode and payloads use a content-addressed blob store. The home, token, database and exported archives are created with restrictive permissions where the host supports POSIX modes. On Windows, `blackbox doctor` verifies that storage and the control token are usable but warns that Node.js cannot verify POSIX owner/group/other mode separation; protect the account and profile directory with appropriate Windows access controls. Set the location with `--home` or `BLACKBOX_HOME`.
 
 ## Credentials and redaction
 

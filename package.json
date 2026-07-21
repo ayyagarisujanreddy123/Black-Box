@@ -25,6 +25,7 @@
     "format:write": "prettier --write .",
     "lint": "eslint . --max-warnings=0",
     "package:smoke": "npm run build && node scripts/package-smoke.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
     "test": "npm run test:unit",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "test:unit": "vitest run",

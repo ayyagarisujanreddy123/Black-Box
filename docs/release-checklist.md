@@ -14,6 +14,14 @@ The matrix uses `fail-fast: false` so one platform cannot hide another platform'
 
 ## Before a release candidate
 
+Run the read-only aggregate preflight first:
+
+```bash
+npm run release:preflight
+```
+
+It runs the source gate, clean-installs the packed runtime set, audits dependencies, checks the candidate manifests, and rejects a dirty tree. Use `npm run --silent release:preflight -- --json` for a machine-readable report without npm's command banner. The command is expected to report blockers while the repository retains placeholder versions, private package flags, or incomplete publication metadata; it never changes those values.
+
 - [ ] Start from a clean, reviewed commit.
 - [ ] Run `npm ci` and `npm run check` locally.
 - [ ] Run `npm audit --audit-level=high` and review the complete dependency tree.

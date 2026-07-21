@@ -518,16 +518,17 @@ npm run check
 Useful commands:
 
 ```bash
-npm run format       # verify Prettier formatting
-npm run lint         # lint implementation and tests
-npm run typecheck    # check strict TypeScript contracts
-npm test             # run unit, contract, fixture, proxy, and lifecycle tests
-npm run test:e2e     # build and test the packaged CLI/daemon path
-npm run package:smoke # pack, clean-install, and exercise the runtime packages
-npm run build        # compile workspaces and package viewer assets
-npm run demo:offline # rebuild and rehearse the seeded incident without a provider
-npm run benchmark    # rebuild and measure local proxy/cockpit overhead
-npm run clean        # remove TypeScript build outputs
+npm run format            # verify Prettier formatting
+npm run lint              # lint implementation and tests
+npm run typecheck         # check strict TypeScript contracts
+npm test                  # run unit, contract, fixture, proxy, and lifecycle tests
+npm run test:e2e          # build and test the packaged CLI/daemon path
+npm run package:smoke     # pack, clean-install, and exercise the runtime packages
+npm run release:preflight # run all local candidate gates without publishing
+npm run build             # compile workspaces and package viewer assets
+npm run demo:offline      # rebuild and rehearse the seeded incident without a provider
+npm run benchmark         # rebuild and measure local proxy/cockpit overhead
+npm run clean             # remove TypeScript build outputs
 ```
 
 Black Box handles forensic evidence. Schema and fixture changes must preserve raw data, label uncertainty honestly, and keep credential-exclusion guarantees intact. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before changing evidence contracts or golden fixtures.

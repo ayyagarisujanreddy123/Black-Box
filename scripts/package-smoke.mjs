@@ -6,18 +6,11 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { runtimePackages } from "./runtime-packages.mjs";
+
 const execute = promisify(execFile);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
-const runtimePackages = [
-  { name: "@blackbox/protocol", directory: "packages/protocol" },
-  { name: "@blackbox/storage", directory: "packages/storage" },
-  { name: "@blackbox/normalizers", directory: "packages/normalizers" },
-  { name: "@blackbox/context", directory: "packages/context" },
-  { name: "@blackbox/analysis", directory: "packages/analysis" },
-  { name: "@blackbox/daemon", directory: "apps/daemon" },
-  { name: "@blackbox/cli", directory: "apps/cli" },
-];
 const runtimePackageNames = new Set(runtimePackages.map(({ name }) => name));
 const forbiddenPackagePaths = [
   /(^|\/)(?:src|test|tests|__tests__)(\/|$)/,

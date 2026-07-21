@@ -564,6 +564,7 @@ For the detailed product contract and milestone acceptance criteria, see:
 - [Security verification map](./docs/security-verification.md)
 - [Three- and seven-minute demo script](./docs/demo-script.md)
 - [Release checklist and CI boundaries](./docs/release-checklist.md)
+- [npm release runbook](./docs/npm-release-runbook.md)
 - [Architecture decisions](./docs/decisions/)
 
 ## License

@@ -10,7 +10,7 @@ Black Box needs to pass raw provider traffic without changing it while also prod
 
 ## Decision
 
-1. Use private npm workspaces and strict TypeScript project builds on Node.js 22.13 or newer.
+1. Use private npm workspaces and strict TypeScript project builds on Node.js 22.15 or newer. This is the first Node.js 22 release that provides the Zstandard APIs required by the evidence blob codec.
 2. Keep shared runtime contracts in `@blackbox/protocol` and validate them with Zod.
 3. Start every durable top-level contract at `schemaVersion: 1`. Current schemas reject an unsupported required version with a distinct error.
 4. Preserve unsupported or malformed records through a typed pointer to the untouched raw blob. Parsing failure must never become evidence loss.

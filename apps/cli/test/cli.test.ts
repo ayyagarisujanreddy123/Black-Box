@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   UnsafeControlOriginError,
   createViewerUrl,
+  nodeRuntimeCheck,
   parseCliArguments,
   requestDaemonStatus,
   resolveStartConfiguration,
@@ -1206,6 +1207,25 @@ describe("CLI canonical inspection", () => {
 });
 
 describe("CLI doctor", () => {
+  it("reports the minimum runtime required by the storage codec", () => {
+    expect(nodeRuntimeCheck("22.14.0")).toMatchObject({
+      id: "node-runtime",
+      status: "fail",
+    });
+    expect(nodeRuntimeCheck("22.15.0")).toMatchObject({
+      id: "node-runtime",
+      status: "pass",
+    });
+    expect(nodeRuntimeCheck("24.0.0")).toMatchObject({
+      id: "node-runtime",
+      status: "pass",
+    });
+    expect(nodeRuntimeCheck("invalid")).toMatchObject({
+      id: "node-runtime",
+      status: "fail",
+    });
+  });
+
   it("reports port conflicts, reachability, storage, limits, and WebSocket support", async () => {
     const root = await temporaryRoot();
     const upstreamOrigin = await upstream();
@@ -1239,6 +1259,7 @@ describe("CLI doctor", () => {
     };
     expect(conflicted.checks).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ id: "node-runtime", status: "pass" }),
         expect.objectContaining({ id: "storage", status: "pass" }),
         expect.objectContaining({ id: "upstream", status: "pass" }),
         expect.objectContaining({ id: "proxy-port", status: "fail" }),

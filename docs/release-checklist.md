@@ -13,7 +13,7 @@ runbook](npm-release-runbook.md).
 The checked-in [CI workflow](../.github/workflows/ci.yml) defines three boundaries:
 
 - formatting, lint, strict typechecking and unit tests on Ubuntu with Node.js 22.20.0;
-- build and unit compatibility at the declared minimum Node.js 22.13.0;
+- build and unit compatibility at the declared minimum Node.js 22.15.0;
 - native dependency installation, production build, packaged CLI lifecycle, and two consecutive offline fallback rehearsals on current GitHub-hosted Ubuntu, macOS and Windows runners.
 
 The matrix uses `fail-fast: false` so one platform cannot hide another platform's result. It grants only read access to repository contents and has no publish credentials or deployment step. A workflow file is not evidence that those jobs passed: record the run URL and immutable commit SHA after it executes on GitHub.

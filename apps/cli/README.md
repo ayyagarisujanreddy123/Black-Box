@@ -6,7 +6,7 @@ Black Box is a local flight recorder for AI coding agents. It records observable
 
 ## Requirements
 
-- Node.js 22.13 or newer
+- Node.js 22.15 or newer
 - An OpenAI-compatible agent or client that accepts a custom base URL
 
 ## Start recording

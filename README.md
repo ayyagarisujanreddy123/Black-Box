@@ -70,7 +70,7 @@ Black Box joins those signals into one evidence trail:
 
 Requirements:
 
-- Node.js 22.13 or newer
+- Node.js 22.15 or newer
 - npm 10 or newer
 - An OpenAI-compatible agent or client that accepts a custom base URL
 

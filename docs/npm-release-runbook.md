@@ -154,8 +154,9 @@ Immediately after the first successful publication:
    - environment: `npm-production`;
    - allowed action: `npm publish`.
 
-5. Use a GitHub-hosted runner, `id-token: write`, Node.js 22.14 or newer, and npm
-   11.5.1 or newer. The permanent publishing job must not receive
+5. Use a GitHub-hosted runner, `id-token: write`, Node.js 22.15 or newer, and npm
+   11.5.1 or newer. This satisfies both Black Box's runtime contract and npm's
+   lower trusted-publishing minimum. The permanent publishing job must not receive
    `NODE_AUTH_TOKEN` or another write credential.
 6. Verify one trusted publication before configuring packages to disallow ordinary
    publishing tokens.

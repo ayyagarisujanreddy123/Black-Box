@@ -23,6 +23,21 @@ export class StorageCompatibilityError extends StorageError {
   }
 }
 
+export class StorageRuntimeCompatibilityError extends StorageError {
+  readonly actualVersion: string;
+  readonly minimumVersion: string;
+
+  constructor(actualVersion: string, minimumVersion: string) {
+    super(
+      "STORAGE_RUNTIME_UNSUPPORTED",
+      `Node.js ${actualVersion} does not provide the required Zstandard storage APIs; use Node.js ${minimumVersion} or newer.`,
+    );
+    this.name = "StorageRuntimeCompatibilityError";
+    this.actualVersion = actualVersion;
+    this.minimumVersion = minimumVersion;
+  }
+}
+
 export class StorageIntegrityError extends StorageError {
   constructor(message: string, options?: ErrorOptions) {
     super("STORAGE_INTEGRITY", message, options);

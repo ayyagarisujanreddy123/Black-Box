@@ -10,14 +10,19 @@ import {
   stat,
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
+import * as zlib from "node:zlib";
 
-import { BlobReferenceSchema, type BlobReference } from "@blackbox/protocol";
+import {
+  BlobReferenceSchema,
+  MINIMUM_NODE_VERSION,
+  type BlobReference,
+} from "@blackbox/protocol";
 import type Database from "better-sqlite3";
 
 import {
   BlobCorruptionError,
   StorageCapacityError,
+  StorageRuntimeCompatibilityError,
   throwTranslatedCapacityError,
 } from "./errors.js";
 
@@ -57,6 +62,18 @@ const TEMP_FILE_SUFFIX = ".tmp";
 
 function sha256(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
+}
+
+export function assertBlobCodecRuntimeSupport(): void {
+  if (
+    typeof zlib.zstdCompressSync !== "function" ||
+    typeof zlib.zstdDecompressSync !== "function"
+  ) {
+    throw new StorageRuntimeCompatibilityError(
+      process.versions.node,
+      MINIMUM_NODE_VERSION,
+    );
+  }
 }
 
 function toReference(row: BlobRow): BlobReference {
@@ -134,6 +151,7 @@ export class BlobStore {
     private readonly dataDirectory: string,
     options: BlobStoreOptions = {},
   ) {
+    assertBlobCodecRuntimeSupport();
     this.blobDirectory = join(dataDirectory, "blobs");
     this.inlineThresholdBytes = options.inlineThresholdBytes ?? 32 * 1024;
     this.maxStoredBytes = options.maxStoredBytes ?? Number.POSITIVE_INFINITY;
@@ -162,7 +180,7 @@ export class BlobStore {
       return toReference(existing);
     }
 
-    const compressed = zstdCompressSync(raw);
+    const compressed = zlib.zstdCompressSync(raw);
     const useCompression = compressed.length < raw.length;
     const codec: BlobRow["codec"] = useCompression ? "zstd" : "identity";
     const stored = useCompression ? compressed : raw;
@@ -279,7 +297,9 @@ export class BlobStore {
     let raw: Buffer;
     try {
       raw =
-        row.codec === "zstd" ? Buffer.from(zstdDecompressSync(stored)) : stored;
+        row.codec === "zstd"
+          ? Buffer.from(zlib.zstdDecompressSync(stored))
+          : stored;
     } catch (error: unknown) {
       throw new BlobCorruptionError(id, "decompression failed", {
         cause: error,

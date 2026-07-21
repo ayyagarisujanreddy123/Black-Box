@@ -13,6 +13,7 @@ import {
   readDaemonLockRecord,
   type DaemonLockRecord,
 } from "@blackbox/daemon";
+import { MINIMUM_NODE_VERSION } from "@blackbox/protocol";
 
 import type { ResolvedStartConfiguration } from "./configuration.js";
 import { BLACK_BOX_VERSION } from "./version.js";
@@ -28,6 +29,43 @@ export interface DoctorCheck {
 export interface DoctorReport {
   readonly checks: readonly DoctorCheck[];
   readonly ok: boolean;
+}
+
+function parseNodeVersion(value: string): readonly number[] | undefined {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/u.exec(value);
+  return match === null
+    ? undefined
+    : [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function versionAtLeast(
+  actual: readonly number[],
+  minimum: readonly number[],
+): boolean {
+  for (let index = 0; index < minimum.length; index += 1) {
+    if (actual[index] !== minimum[index]) {
+      return (actual[index] ?? 0) > (minimum[index] ?? 0);
+    }
+  }
+  return true;
+}
+
+export function nodeRuntimeCheck(
+  nodeVersion: string = process.versions.node,
+): DoctorCheck {
+  const actual = parseNodeVersion(nodeVersion);
+  const minimum = parseNodeVersion(MINIMUM_NODE_VERSION);
+  const supported =
+    actual !== undefined &&
+    minimum !== undefined &&
+    versionAtLeast(actual, minimum);
+  return {
+    id: "node-runtime",
+    status: supported ? "pass" : "fail",
+    message: supported
+      ? `Node.js ${nodeVersion} satisfies the ${MINIMUM_NODE_VERSION} minimum`
+      : `Node.js ${nodeVersion} is unsupported; install Node.js ${MINIMUM_NODE_VERSION} or newer`,
+  };
 }
 
 function mode(value: number): string {
@@ -286,6 +324,7 @@ export async function runDoctor(
 ): Promise<DoctorReport> {
   const lock = await lockInspection(configuration);
   const checks: DoctorCheck[] = [
+    nodeRuntimeCheck(),
     await storageCheck(configuration),
     await tokenCheck(configuration),
     lock.check,

@@ -21,6 +21,10 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 - Recorded markup remains inert, optional external analysis is disabled by default, and imported evidence cannot trigger analysis or replay.
 - Apache-2.0 licensing and generated third-party notices are included in future runtime package contents.
 
+### Fixed
+
+- Corrected the minimum Node.js requirement to 22.15.0, the first 22.x release with the Zstandard APIs required by the evidence blob store, and added an explicit `doctor` runtime check.
+
 ### Known limitations
 
 - Responses WebSocket/Realtime and non-OpenAI provider protocols are not supported.

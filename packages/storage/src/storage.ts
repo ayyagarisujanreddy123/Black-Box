@@ -3,7 +3,11 @@ import { dirname, join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
 
-import { BlobStore, type BlobStoreOptions } from "./blob-store.js";
+import {
+  BlobStore,
+  assertBlobCodecRuntimeSupport,
+  type BlobStoreOptions,
+} from "./blob-store.js";
 import { StorageCompatibilityError } from "./errors.js";
 import { EventRepository } from "./event-repository.js";
 import {
@@ -238,6 +242,7 @@ export class BlackBoxStorage {
 export async function openBlackBoxStorage(
   options: OpenStorageOptions,
 ): Promise<BlackBoxStorage> {
+  assertBlobCodecRuntimeSupport();
   const databasePath = resolve(options.databasePath);
   const dataDirectory = resolve(
     options.dataDirectory ?? join(dirname(databasePath), "blackbox-data"),

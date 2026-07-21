@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { MINIMUM_NODE_VERSION } from "../packages/protocol/dist/index.js";
 import { runtimePackages } from "./runtime-packages.mjs";
 
 const execute = promisify(execFile);
@@ -81,6 +82,11 @@ async function validatePackageManifests() {
   );
   const license = await readFile(join(repositoryRoot, "LICENSE"), "utf8");
   assert.match(license, /Apache License\s+Version 2\.0, January 2004/);
+  assert.equal(
+    rootManifest.engines?.node,
+    `>=${MINIMUM_NODE_VERSION}`,
+    "root Node.js engine differs from the runtime compatibility check",
+  );
   for (const runtimePackage of runtimePackages) {
     const manifest = JSON.parse(
       await readFile(

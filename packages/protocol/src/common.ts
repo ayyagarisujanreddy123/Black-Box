@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const CURRENT_SCHEMA_VERSION = 1 as const;
+export const MINIMUM_NODE_VERSION = "22.15.0" as const;
 
 export const SchemaVersionSchema = z.literal(CURRENT_SCHEMA_VERSION);
 export const IdentifierSchema = z.string().trim().min(1).max(512);

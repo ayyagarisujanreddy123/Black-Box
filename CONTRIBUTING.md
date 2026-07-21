@@ -4,7 +4,7 @@ Black Box handles forensic evidence. Changes must preserve raw data, label uncer
 
 ## Setup
 
-Use Node.js 22.13 or newer and npm 10 or newer:
+Use Node.js 22.15 or newer and npm 10 or newer:
 
 ```bash
 npm install

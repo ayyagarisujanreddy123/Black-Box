@@ -811,7 +811,7 @@ Version 0.1.0 is an unreleased source candidate. The packages remain marked priv
 
 ### Requirements
 
-- Node.js 22.13 or newer;
+- Node.js 22.15 or newer;
 - npm 10 or newer;
 - an OpenAI-compatible agent/client that can honor a custom base URL for API capture;
 - permission to inspect the target workspace and traffic.
@@ -1201,7 +1201,7 @@ The tests cover protocol fidelity, malformed/unknown input, credential exclusion
 `.github/workflows/ci.yml` defines:
 
 - formatting, lint, typecheck, and unit tests on Ubuntu with Node.js 22.20;
-- build and unit compatibility at the minimum Node.js 22.13;
+- build and unit compatibility at the minimum Node.js 22.15;
 - native dependency installation, packaged lifecycle tests, and package smoke installation on Ubuntu, macOS, and Windows.
 
 The workflow has read-only repository permissions and no publication step or credentials. Because this source work has not been pushed as part of the current local continuation, the workflow definition must not be confused with a recorded remote CI success for the current SHA.

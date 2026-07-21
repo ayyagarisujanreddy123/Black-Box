@@ -14,7 +14,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.15.0"
   },
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",

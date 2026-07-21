@@ -92,10 +92,11 @@ Before dispatching it:
 5. Dispatch **Bootstrap npm release** from `main`, entering the exact 40-character
    candidate SHA and the confirmation `publish-0.1.0-to-next`.
 
-The workflow re-runs all local gates, verifies the token identity, refuses to begin
-if any `0.1.0` package already exists, and publishes dependencies first under the
-`next` dist-tag with provenance. The refusal is deliberate: blindly rerunning after
-a partial publication can make an incident worse.
+The workflow installs only the explicitly reviewed, version-pinned dependency
+lifecycle scripts, re-runs all local gates, verifies the token identity, refuses to
+begin if any `0.1.0` package already exists, and publishes dependencies first under
+the `next` dist-tag with provenance. The refusal is deliberate: blindly rerunning
+after a partial publication can make an incident worse.
 
 GitHub environments can hold approval-gated secrets as described in [GitHub's
 deployment environment documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments/).

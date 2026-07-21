@@ -21,6 +21,10 @@
     "node": ">=22.15.0"
   },
   "packageManager": "npm@10.9.3",
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "fsevents@2.3.3": true
+  },
   "scripts": {
     "blackbox": "node apps/cli/dist/bin.js",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
@@ -52,5 +56,9 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.64.0",
     "vitest": "4.1.10"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "fsevents": false
   }
 }

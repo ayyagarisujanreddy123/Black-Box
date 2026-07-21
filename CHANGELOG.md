@@ -20,6 +20,7 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 - Control and cockpit services default to loopback with token and origin checks.
 - Recorded markup remains inert, optional external analysis is disabled by default, and imported evidence cannot trigger analysis or replay.
 - Apache-2.0 licensing and generated third-party notices are included in future runtime package contents.
+- Repository install scripts are explicitly reviewed and version-pinned for npm's dependency lifecycle policy.
 
 ### Fixed
 

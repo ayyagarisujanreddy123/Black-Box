@@ -72,7 +72,7 @@ jobs:
           npm --version
 
       - name: Install exact dependencies
-        run: npm ci
+        run: npm ci --strict-allow-scripts
 
       - name: Run source quality and packaged lifecycle gates
         run: npm run check

@@ -2,7 +2,11 @@
   "name": "@blackbox/analysis",
   "version": "0.0.0",
   "private": true,
+  "description": "Deterministic evidence ranking and incident reports for Black Box",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

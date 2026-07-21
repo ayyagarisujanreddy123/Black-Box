@@ -2,7 +2,11 @@
   "name": "@blackbox/cli",
   "version": "0.0.0",
   "private": true,
+  "description": "Local flight recorder and evidence cockpit for AI coding agents",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "bin": {
     "blackbox": "./dist/bin.js"
   },

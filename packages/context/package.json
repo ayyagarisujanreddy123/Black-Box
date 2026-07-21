@@ -2,7 +2,11 @@
   "name": "@blackbox/context",
   "version": "0.0.0",
   "private": true,
+  "description": "Client-visible model context reconstruction for Black Box",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

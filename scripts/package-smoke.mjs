@@ -10,14 +10,15 @@ const execute = promisify(execFile);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
 const runtimePackages = [
-  "@blackbox/protocol",
-  "@blackbox/storage",
-  "@blackbox/normalizers",
-  "@blackbox/context",
-  "@blackbox/analysis",
-  "@blackbox/daemon",
-  "@blackbox/cli",
+  { name: "@blackbox/protocol", directory: "packages/protocol" },
+  { name: "@blackbox/storage", directory: "packages/storage" },
+  { name: "@blackbox/normalizers", directory: "packages/normalizers" },
+  { name: "@blackbox/context", directory: "packages/context" },
+  { name: "@blackbox/analysis", directory: "packages/analysis" },
+  { name: "@blackbox/daemon", directory: "apps/daemon" },
+  { name: "@blackbox/cli", directory: "apps/cli" },
 ];
+const runtimePackageNames = new Set(runtimePackages.map(({ name }) => name));
 const forbiddenPackagePaths = [
   /(^|\/)(?:src|test|tests|__tests__)(\/|$)/,
   /\.map$/,
@@ -72,7 +73,55 @@ function validatePackageContents(result) {
   }
 }
 
+async function validatePackageManifests() {
+  const rootManifest = JSON.parse(
+    await readFile(join(repositoryRoot, "package.json"), "utf8"),
+  );
+  for (const runtimePackage of runtimePackages) {
+    const manifest = JSON.parse(
+      await readFile(
+        join(repositoryRoot, runtimePackage.directory, "package.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(manifest.name, runtimePackage.name);
+    assert.equal(
+      manifest.version,
+      rootManifest.version,
+      `${manifest.name} version differs from the release set`,
+    );
+    assert.equal(
+      manifest.engines?.node,
+      rootManifest.engines?.node,
+      `${manifest.name} has a different Node.js compatibility contract`,
+    );
+    assert.ok(
+      typeof manifest.description === "string" &&
+        manifest.description.trim().length > 0,
+      `${manifest.name} lacks a package description`,
+    );
+
+    for (const [dependency, version] of Object.entries(
+      manifest.dependencies ?? {},
+    )) {
+      if (!dependency.startsWith("@blackbox/")) {
+        continue;
+      }
+      assert.ok(
+        runtimePackageNames.has(dependency),
+        `${manifest.name} depends on unpacked runtime package ${dependency}`,
+      );
+      assert.equal(
+        version,
+        rootManifest.version,
+        `${manifest.name} depends on ${dependency} at ${version}`,
+      );
+    }
+  }
+}
+
 async function run() {
+  await validatePackageManifests();
   const temporaryRoot = await mkdtemp(
     join(tmpdir(), "blackbox-package-smoke-"),
   );
@@ -84,7 +133,7 @@ async function run() {
 
     const results = [];
     const archives = [];
-    for (const packageName of runtimePackages) {
+    for (const { name: packageName } of runtimePackages) {
       const { stdout } = await execute(
         npmExecutable,
         [

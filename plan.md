@@ -556,19 +556,21 @@ Record machine, runtime version, fixture hash, and command alongside results. Do
 
 Before the first live API test:
 
-- [ ] Authorization/cookie headers are excluded at the type and storage layers.
-- [ ] Test database scan verifies known fake secrets are absent.
-- [ ] Data directory permissions are restrictive.
-- [ ] Proxy and viewer bind only to loopback.
-- [ ] Upstream loop detection is active.
-- [ ] Viewer has CSP, Origin checks, and inert payload rendering.
-- [ ] Local control token is random and never printed in normal logs.
-- [ ] Request logging does not stringify headers/body outside the redactor.
-- [ ] Recorded content is delimited as untrusted evidence in analysis prompts.
-- [ ] AI analysis is disabled by default and requires preview/consent.
-- [ ] Export rejects absolute paths and `..` traversal.
-- [ ] Quota and retention warnings are visible.
-- [ ] Demo operates only in a disposable directory.
+Implementation and regression references are recorded in the [security verification map](./docs/security-verification.md).
+
+- [x] Authorization/cookie headers are excluded at the type and storage layers.
+- [x] Test database scan verifies known fake secrets are absent.
+- [x] Data directory permissions are restrictive.
+- [x] Proxy and viewer bind only to loopback.
+- [x] Upstream loop detection is active.
+- [x] Viewer has CSP, Origin checks, and inert payload rendering.
+- [x] Local control token is random and never printed in normal logs.
+- [x] Request logging does not stringify headers/body outside the redactor.
+- [x] Recorded content is delimited as untrusted evidence in analysis prompts.
+- [x] AI analysis is disabled by default and requires preview/consent.
+- [x] Export rejects absolute paths and `..` traversal.
+- [x] Quota and retention warnings are visible.
+- [x] Demo operates only in a disposable directory.
 
 ## 10. Documentation plan
 

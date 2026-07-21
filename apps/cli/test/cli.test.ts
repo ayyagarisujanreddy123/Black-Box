@@ -175,6 +175,18 @@ describe("CLI initialization and configuration", () => {
     expect(stderr.value).toContain("Unknown flag --mystery");
     expect(stderr.value).toContain("blackbox --help");
   });
+
+  it("makes quota and dry-run retention controls visible in help", async () => {
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+
+    expect(await runCli(["--help"], runtime(stdout, stderr))).toBe(0);
+    expect(stderr.value).toBe("");
+    expect(stdout.value).toContain("--max-stored-bytes N");
+    expect(stdout.value).toContain("blackbox delete <session-id> [--yes]");
+    expect(stdout.value).toContain("blackbox prune [--older-than-days N]");
+    expect(stdout.value).toContain("Apply a displayed delete/prune plan");
+  });
 });
 
 describe("CLI daemon lifecycle", () => {

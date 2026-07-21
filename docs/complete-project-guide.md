@@ -1440,6 +1440,7 @@ These are future directions, not 0.1.0 capabilities.
 - [Performance results](performance.md) — reproducible benchmark method and limits
 - [Demo script](demo-script.md) — three-minute, seven-minute, and fallback paths
 - [Release checklist](release-checklist.md) — source gates and authorization boundaries
+- [Security verification map](security-verification.md) — implementation and regression evidence for each security control
 - [Security policy](../SECURITY.md) — vulnerability reporting and trust model
 - [Contribution guide](../CONTRIBUTING.md) — rules for changing forensic contracts
 - [Architecture decisions](decisions/) — decision-by-decision implementation rationale

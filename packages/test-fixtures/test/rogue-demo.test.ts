@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,6 +119,28 @@ describe("deterministic rogue demo fixture", () => {
       await expect(stat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to reset a directory that is not explicitly demo-scoped", async () => {
+    const unsafeRoot = await mkdtemp(join(tmpdir(), "unsafe-reset-target-"));
+    const markerPath = join(unsafeRoot, "must-survive.txt");
+    await writeFile(markerPath, "preserved\n");
+    try {
+      await expect(
+        execute(
+          process.execPath,
+          [resetScriptPath, "--output", unsafeRoot, "--clean"],
+          { encoding: "utf8" },
+        ),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining(
+          "Demo output must be a dedicated directory",
+        ),
+      });
+      await expect(readFile(markerPath, "utf8")).resolves.toBe("preserved\n");
+    } finally {
+      await rm(unsafeRoot, { recursive: true, force: true });
     }
   });
 });

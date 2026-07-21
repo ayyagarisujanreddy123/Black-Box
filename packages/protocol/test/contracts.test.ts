@@ -376,7 +376,7 @@ describe("privacy and inference constraints", () => {
     ).toBe(false);
   });
 
-  it("accepts normalized BBX manifests and rejects traversal paths", () => {
+  it("accepts normalized BBX manifests and rejects unsafe paths", () => {
     const archive = {
       schemaVersion: 1,
       manifest: {
@@ -424,20 +424,30 @@ describe("privacy and inference constraints", () => {
       ],
     };
     expect(BbxArchiveSchema.parse(archive).manifest.profile).toBe("share");
-    expect(
-      BbxArchiveSchema.safeParse({
-        ...archive,
-        manifest: {
-          ...archive.manifest,
-          entries: [
-            {
-              ...archive.manifest.entries[0],
-              path: "../evidence.json",
-            },
-          ],
-        },
-        entries: [{ ...archive.entries[0], path: "../evidence.json" }],
-      }).success,
-    ).toBe(false);
+    for (const unsafePath of [
+      "/absolute/evidence.json",
+      "../evidence.json",
+      "records/../evidence.json",
+      "records/./evidence.json",
+      "records//evidence.json",
+      "C:/evidence.json",
+    ]) {
+      expect(
+        BbxArchiveSchema.safeParse({
+          ...archive,
+          manifest: {
+            ...archive.manifest,
+            entries: [
+              {
+                ...archive.manifest.entries[0],
+                path: unsafePath,
+              },
+            ],
+          },
+          entries: [{ ...archive.entries[0], path: unsafePath }],
+        }).success,
+        unsafePath,
+      ).toBe(false);
+    }
   });
 });

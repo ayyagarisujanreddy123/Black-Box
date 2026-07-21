@@ -20,7 +20,11 @@ export const BbxArchiveEntryPathSchema = z
     (path) =>
       !path.startsWith("/") &&
       !path.endsWith("/") &&
-      !path.split("/").some((segment) => segment === ".." || segment === ""),
+      !path
+        .split("/")
+        .some(
+          (segment) => segment === "." || segment === ".." || segment === "",
+        ),
     "Archive entry paths must be normalized relative paths.",
   );
 

@@ -2,6 +2,8 @@
 
 Black Box 0.1.0 is an unreleased source candidate. Completing a source check is necessary but does not authorize a tag, package publication, signing operation, or update to `origin`.
 
+The implemented privacy/security controls and their regression coverage are indexed in the [security verification map](security-verification.md).
+
 ## Automated source gates
 
 The checked-in [CI workflow](../.github/workflows/ci.yml) defines three boundaries:

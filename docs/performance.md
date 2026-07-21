@@ -4,24 +4,24 @@ This document publishes a reproducible local smoke measurement, not a general pe
 
 ## Result
 
-- Measured: 2026-07-21T03:40:15.011Z
-- Measured source commit: `cad4eed5a96cb6036a73590ed41d03a152141345`
+- Measured: 2026-07-21T07:10:05.214Z
+- Measured source commit: `fbf8504325f54b5747b1f7b46a74da7bcd0740ef`
 - Command: `npm run benchmark`
 - Samples: 10 warmups, then 100 measured requests per route
 - Machine: Intel Core i7-9750H, macOS 25.5.0, x64
 - Runtime: Node.js v22.20.0
 - Fixture SHA-256: `a48eb11e0f9d8862dc401e68ce421e6417365163c286287f24867f38ab717f1f`
 
-| Route and metric               | p50      | p95       |
-| ------------------------------ | -------- | --------- |
-| Direct upstream TTFB           | 1.132 ms | 2.196 ms  |
-| Recorded proxy TTFB            | 7.812 ms | 11.973 ms |
-| Direct upstream total          | 1.283 ms | 2.406 ms  |
-| Recorded proxy total           | 7.960 ms | 12.340 ms |
-| Cockpit initial document TTFB  | 1.486 ms | 2.037 ms  |
-| Cockpit initial document total | 1.609 ms | 2.243 ms  |
+| Route and metric               | p50      | p95      |
+| ------------------------------ | -------- | -------- |
+| Direct upstream TTFB           | 0.666 ms | 3.245 ms |
+| Recorded proxy TTFB            | 4.703 ms | 6.773 ms |
+| Direct upstream total          | 0.753 ms | 3.359 ms |
+| Recorded proxy total           | 4.780 ms | 6.897 ms |
+| Cockpit initial document TTFB  | 0.905 ms | 1.197 ms |
+| Cockpit initial document total | 0.977 ms | 1.307 ms |
 
-The p95 recorded-minus-direct delta was 9.777 ms to first byte and 9.934 ms total. The packaged cockpit had three production assets totaling 350,226 raw bytes and 99,525 bytes when each asset was gzipped. Source maps are excluded from that payload count.
+The p95 recorded-minus-direct delta was 3.528 ms to first byte and 3.538 ms total. The packaged cockpit had three production assets totaling 350,226 raw bytes and 99,525 bytes when each asset was gzipped. Source maps are excluded from that payload count.
 
 ## Method and limits
 

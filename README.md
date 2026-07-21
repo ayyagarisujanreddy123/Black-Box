@@ -408,7 +408,7 @@ If a live provider is unavailable during a real investigation, process and works
 
 ## Measured local smoke test
 
-On 2026-07-20, the reproducible 100-sample loopback benchmark measured 9.777 ms of p95 proxy time-to-first-byte overhead on an Intel i7-9750H Mac running Node.js 22.20.0. The cockpit's initial HTML response completed in 2.243 ms at p95, and its three production assets totaled 99,525 bytes when gzipped. These are machine-specific smoke results—not browser render, Internet, streaming, or load-test claims. See the fixture hash, measured source commit, full distribution, method, and limitations in [docs/performance.md](docs/performance.md), then reproduce them with `npm run benchmark`.
+On 2026-07-21, the reproducible 100-sample loopback benchmark measured 3.528 ms of p95 proxy time-to-first-byte overhead on an Intel i7-9750H Mac running Node.js 22.20.0. The cockpit's initial HTML response completed in 1.307 ms at p95, and its three production assets totaled 99,525 bytes when gzipped. These are machine-specific smoke results—not browser render, Internet, streaming, or load-test claims. See the fixture hash, measured source commit, full distribution, method, and limitations in [docs/performance.md](docs/performance.md), then reproduce them with `npm run benchmark`.
 
 ## Supported today
 

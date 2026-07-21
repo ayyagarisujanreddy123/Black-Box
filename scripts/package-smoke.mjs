@@ -42,6 +42,10 @@ function validatePackageContents(result) {
 
   assert.ok(paths.includes("dist/LICENSE"), `${result.name} lacks its license`);
   assert.ok(
+    paths.includes("README.md"),
+    `${result.name} lacks its package README`,
+  );
+  assert.ok(
     paths.includes("dist/index.js"),
     `${result.name} lacks dist/index.js`,
   );
@@ -51,7 +55,6 @@ function validatePackageContents(result) {
   );
 
   if (result.name === "@blackbox/cli") {
-    assert.ok(paths.includes("README.md"), "CLI lacks its package README");
     assert.ok(
       paths.includes("dist/THIRD_PARTY_NOTICES"),
       "CLI lacks bundled dependency notices",

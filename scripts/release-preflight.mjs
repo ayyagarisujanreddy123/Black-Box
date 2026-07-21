@@ -11,6 +11,13 @@ const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
 const gitExecutable = "git";
 const maximumOutputBytes = 100 * 1024 * 1024;
+const privateWorkspaceDirectories = [
+  ".",
+  "apps/demo-agent",
+  "apps/viewer",
+  "packages/adapters",
+  "packages/test-fixtures",
+];
 const acceptedArguments = new Set(["--json"]);
 const arguments_ = process.argv.slice(2);
 
@@ -112,6 +119,15 @@ async function manifestChecks() {
       ),
     })),
   );
+  const privateWorkspaceManifests = await Promise.all(
+    privateWorkspaceDirectories.map(async (directory) => ({
+      directory,
+      manifest:
+        directory === "."
+          ? rootManifest
+          : await readJson(join(repositoryRoot, directory, "package.json")),
+    })),
+  );
   const checks = [];
 
   const candidateVersion = rootManifest.version;
@@ -158,6 +174,24 @@ async function manifestChecks() {
           "Publishable runtime packages",
           `${privatePackages.length} runtime packages are still private`,
           privatePackages.join("\n"),
+        ),
+  );
+
+  const exposedDevelopmentWorkspaces = privateWorkspaceManifests
+    .filter(({ manifest }) => manifest.private !== true)
+    .map(({ directory, manifest }) => `${manifest.name} (${directory})`);
+  checks.push(
+    exposedDevelopmentWorkspaces.length === 0
+      ? passed(
+          "private-development-workspaces",
+          "Private development workspaces",
+          `${privateWorkspaceManifests.length} non-runtime workspaces remain protected`,
+        )
+      : failed(
+          "private-development-workspaces",
+          "Private development workspaces",
+          "one or more non-runtime workspaces could be published accidentally",
+          exposedDevelopmentWorkspaces.join("\n"),
         ),
   );
 
@@ -226,22 +260,29 @@ async function manifestChecks() {
         ),
   );
 
-  const cliReadme = await firstExistingFile(
-    ["README.md", "README", "README.txt"].map((name) =>
-      join(repositoryRoot, "apps", "cli", name),
-    ),
-  );
+  const missingPackageReadmes = [];
+  for (const { runtimePackage, manifest } of manifests) {
+    const readme = await firstExistingFile(
+      ["README.md", "README", "README.txt"].map((name) =>
+        join(repositoryRoot, runtimePackage.directory, name),
+      ),
+    );
+    if (readme === undefined) {
+      missingPackageReadmes.push(manifest.name);
+    }
+  }
   checks.push(
-    cliReadme === undefined
+    missingPackageReadmes.length > 0
       ? failed(
-          "cli-readme",
-          "CLI package README",
-          "add package-local installation and safety documentation for the npm listing",
+          "package-readmes",
+          "Runtime package READMEs",
+          "add package-local documentation for every npm listing",
+          missingPackageReadmes.join("\n"),
         )
       : passed(
-          "cli-readme",
-          "CLI package README",
-          "package-local README is present",
+          "package-readmes",
+          "Runtime package READMEs",
+          `${manifests.length} package-local READMEs are present`,
         ),
   );
 

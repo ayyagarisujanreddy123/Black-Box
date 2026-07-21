@@ -1,0 +1,171 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execute = promisify(execFile);
+const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const runtimePackages = [
+  "@blackbox/protocol",
+  "@blackbox/storage",
+  "@blackbox/normalizers",
+  "@blackbox/context",
+  "@blackbox/analysis",
+  "@blackbox/daemon",
+  "@blackbox/cli",
+];
+const forbiddenPackagePaths = [
+  /(^|\/)(?:src|test|tests|__tests__)(\/|$)/,
+  /\.map$/,
+  /\.tsbuildinfo$/,
+  /(^|\/)\.env(?:\.|$)/,
+  /(^|\/)(?:logs?)(\/|$)/,
+  /\.(?:db|sqlite|sqlite3)(?:$|[.-])/,
+];
+
+function parsePackResult(stdout, packageName) {
+  const parsed = JSON.parse(stdout);
+  assert.ok(Array.isArray(parsed) && parsed.length === 1);
+  const [result] = parsed;
+  assert.equal(result.name, packageName);
+  assert.ok(Array.isArray(result.files));
+  return result;
+}
+
+function validatePackageContents(result) {
+  const paths = result.files.map((file) => file.path);
+  for (const path of paths) {
+    assert.equal(
+      forbiddenPackagePaths.some((pattern) => pattern.test(path)),
+      false,
+      `${result.name} contains forbidden package entry: ${path}`,
+    );
+  }
+
+  assert.ok(
+    paths.includes("dist/index.js"),
+    `${result.name} lacks dist/index.js`,
+  );
+  assert.ok(
+    paths.includes("dist/index.d.ts"),
+    `${result.name} lacks dist/index.d.ts`,
+  );
+
+  if (result.name === "@blackbox/cli") {
+    assert.ok(paths.includes("dist/bin.js"), "CLI lacks its executable");
+    assert.ok(
+      paths.includes("dist/viewer/index.html"),
+      "CLI lacks viewer HTML",
+    );
+    assert.ok(
+      paths.some((path) => /^dist\/viewer\/assets\/.+\.js$/.test(path)),
+      "CLI lacks viewer JavaScript",
+    );
+    assert.ok(
+      paths.some((path) => /^dist\/viewer\/assets\/.+\.css$/.test(path)),
+      "CLI lacks viewer CSS",
+    );
+  }
+}
+
+async function run() {
+  const temporaryRoot = await mkdtemp(
+    join(tmpdir(), "blackbox-package-smoke-"),
+  );
+  try {
+    const packDirectory = join(temporaryRoot, "packages");
+    const installDirectory = join(temporaryRoot, "install");
+    await mkdir(packDirectory, { recursive: true });
+    await mkdir(installDirectory, { recursive: true });
+
+    const results = [];
+    const archives = [];
+    for (const packageName of runtimePackages) {
+      const { stdout } = await execute(
+        npmExecutable,
+        [
+          "pack",
+          "--json",
+          "--pack-destination",
+          packDirectory,
+          "--workspace",
+          packageName,
+        ],
+        { cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024 },
+      );
+      const result = parsePackResult(stdout, packageName);
+      validatePackageContents(result);
+      results.push(result);
+      archives.push(join(packDirectory, result.filename));
+    }
+
+    await writeFile(
+      join(installDirectory, "package.json"),
+      `${JSON.stringify({ name: "blackbox-package-smoke", private: true }, null, 2)}\n`,
+    );
+    await execute(
+      npmExecutable,
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--no-save",
+        "--package-lock=false",
+        ...archives,
+      ],
+      { cwd: installDirectory, maxBuffer: 20 * 1024 * 1024 },
+    );
+
+    const binary = join(
+      installDirectory,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "blackbox.cmd" : "blackbox",
+    );
+    const help = await execute(binary, ["--help"], {
+      cwd: installDirectory,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    assert.match(help.stdout, /Usage:\s+blackbox/);
+
+    const installedBin = await readFile(
+      join(
+        installDirectory,
+        "node_modules",
+        "@blackbox",
+        "cli",
+        "dist",
+        "bin.js",
+      ),
+      "utf8",
+    );
+    assert.ok(installedBin.startsWith("#!/usr/bin/env node\n"));
+
+    const blackBoxHome = join(temporaryRoot, "home");
+    await execute(binary, ["init", "--home", blackBoxHome], {
+      cwd: installDirectory,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    const sessions = await execute(
+      binary,
+      ["sessions", "--home", blackBoxHome, "--json"],
+      { cwd: installDirectory, maxBuffer: 20 * 1024 * 1024 },
+    );
+    assert.deepEqual(JSON.parse(sessions.stdout), []);
+
+    console.log("Package smoke test passed:");
+    for (const result of results) {
+      console.log(
+        `- ${result.filename}: ${result.files.length} files, ${result.size.toLocaleString()} packed bytes`,
+      );
+    }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+await run();

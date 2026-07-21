@@ -5,6 +5,10 @@
   "type": "module",
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
   "dependencies": {
     "@blackbox/analysis": "0.0.0",
     "@blackbox/context": "0.0.0",

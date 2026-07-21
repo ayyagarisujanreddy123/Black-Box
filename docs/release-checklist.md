@@ -19,9 +19,10 @@ The matrix uses `fail-fast: false` so one platform cannot hide another platform'
 - [ ] Run `npm audit --audit-level=high` and review the complete dependency tree.
 - [ ] Run `npm run benchmark`; update measured claims only if the method and final source match.
 - [ ] Run `npm run demo:offline` twice with external network access unavailable.
+- [ ] Run `npm run package:smoke`; inspect the reported tarball names, file counts, and sizes.
 - [ ] Confirm the demo repository still contains its test and both report artifacts were produced.
 - [ ] Confirm CI passed on Ubuntu, macOS and Windows for the exact candidate SHA.
-- [ ] Inspect the package tarball from the package smoke test; reject secrets, local databases, logs, source maps, fixtures not intended for distribution, and missing runtime assets.
+- [ ] Inspect the package tarballs from the package smoke test; reject secrets, local databases, logs, source maps, fixtures not intended for distribution, and missing runtime assets.
 - [ ] Review `.bbx` share/forensic warnings, optional-AI consent copy, and supported/unsupported claims.
 - [ ] Record known limitations and migration compatibility.
 - [ ] Capture fallback screenshots/video from the exact candidate, if required for the release venue.

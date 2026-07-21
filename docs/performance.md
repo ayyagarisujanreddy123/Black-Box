@@ -4,7 +4,8 @@ This document publishes a reproducible local smoke measurement, not a general pe
 
 ## Result
 
-- Measured: 2026-07-20T23:45:46.931Z
+- Measured: 2026-07-21T03:40:15.011Z
+- Measured source commit: `cad4eed5a96cb6036a73590ed41d03a152141345`
 - Command: `npm run benchmark`
 - Samples: 10 warmups, then 100 measured requests per route
 - Machine: Intel Core i7-9750H, macOS 25.5.0, x64
@@ -13,14 +14,14 @@ This document publishes a reproducible local smoke measurement, not a general pe
 
 | Route and metric               | p50      | p95       |
 | ------------------------------ | -------- | --------- |
-| Direct upstream TTFB           | 1.021 ms | 1.425 ms  |
-| Recorded proxy TTFB            | 6.941 ms | 10.035 ms |
-| Direct upstream total          | 1.127 ms | 1.621 ms  |
-| Recorded proxy total           | 7.077 ms | 10.233 ms |
-| Cockpit initial document TTFB  | 1.346 ms | 2.057 ms  |
-| Cockpit initial document total | 1.465 ms | 2.269 ms  |
+| Direct upstream TTFB           | 1.132 ms | 2.196 ms  |
+| Recorded proxy TTFB            | 7.812 ms | 11.973 ms |
+| Direct upstream total          | 1.283 ms | 2.406 ms  |
+| Recorded proxy total           | 7.960 ms | 12.340 ms |
+| Cockpit initial document TTFB  | 1.486 ms | 2.037 ms  |
+| Cockpit initial document total | 1.609 ms | 2.243 ms  |
 
-The p95 recorded-minus-direct delta was 8.610 ms to first byte and 8.612 ms total. The packaged cockpit had three production assets totaling 350,217 raw bytes and 99,523 bytes when each asset was gzipped. Source maps are excluded from that payload count.
+The p95 recorded-minus-direct delta was 9.777 ms to first byte and 9.934 ms total. The packaged cockpit had three production assets totaling 350,226 raw bytes and 99,525 bytes when each asset was gzipped. Source maps are excluded from that payload count.
 
 ## Method and limits
 

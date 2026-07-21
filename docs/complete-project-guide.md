@@ -1191,7 +1191,7 @@ This runs formatting, linting, strict typechecking, unit/contract tests, a produ
 At the 0.1.0 candidate checkpoint, the local gate passed:
 
 - 32 unit/contract test files;
-- 276 unit/contract tests;
+- 278 unit/contract tests;
 - two packaged end-to-end tests.
 
 The tests cover protocol fidelity, malformed/unknown input, credential exclusion, storage recovery, migrations, blobs, sessionization, process/workspace effects, query auth, live streams, viewer safety, context completeness, blame controls, anomalies, report consent/fallback, archive integrity/read-only import, retention, and demo behavior.
@@ -1243,10 +1243,10 @@ The reproducible loopback smoke benchmark used 10 warmups and 100 measured reque
 
 Measured results:
 
-- p95 proxy time-to-first-byte delta over direct loopback: 8.610 ms;
-- p95 proxy total-duration delta: 8.612 ms;
-- p95 cockpit initial HTML total: 2.269 ms;
-- three packaged cockpit assets: 99,523 bytes when each is gzipped.
+- p95 proxy time-to-first-byte delta over direct loopback: 9.777 ms;
+- p95 proxy total-duration delta: 9.934 ms;
+- p95 cockpit initial HTML total: 2.243 ms;
+- three packaged cockpit assets: 99,525 bytes when each is gzipped.
 
 These are machine-specific smoke measurements, not browser-render, Internet, streaming, concurrency, memory, or general production guarantees.
 

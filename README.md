@@ -455,6 +455,7 @@ See the complete option list with:
 
 ```bash
 blackbox --help
+blackbox --version
 ```
 
 ## Architecture
@@ -535,7 +536,7 @@ Black Box handles forensic evidence. Schema and fixture changes must preserve ra
 
 ## Project status
 
-The core capabilities scheduled for milestones M0 through M9 are implemented in this source tree:
+Version 0.1.0 is the current unreleased source candidate. The core capabilities scheduled for milestones M0 through M9 are implemented in this source tree:
 
 - Recorder contracts and golden fixtures
 - Crash-safe storage and content-addressed blobs

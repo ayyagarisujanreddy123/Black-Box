@@ -1,6 +1,6 @@
 {
   "name": "@blackbox/normalizers",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "OpenAI-compatible evidence normalization for Black Box",
   "license": "Apache-2.0",
@@ -24,10 +24,10 @@
     "dist/**/*.d.ts"
   ],
   "dependencies": {
-    "@blackbox/protocol": "0.0.0",
+    "@blackbox/protocol": "0.1.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@blackbox/test-fixtures": "0.0.0"
+    "@blackbox/test-fixtures": "0.1.0"
   }
 }

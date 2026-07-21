@@ -1,6 +1,6 @@
 {
   "name": "@blackbox/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Local flight recorder and evidence cockpit for AI coding agents",
   "license": "Apache-2.0",
@@ -30,8 +30,8 @@
     "dist/**/*.css"
   ],
   "dependencies": {
-    "@blackbox/daemon": "0.0.0",
-    "@blackbox/protocol": "0.0.0",
-    "@blackbox/storage": "0.0.0"
+    "@blackbox/daemon": "0.1.0",
+    "@blackbox/protocol": "0.1.0",
+    "@blackbox/storage": "0.1.0"
   }
 }

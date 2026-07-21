@@ -136,6 +136,9 @@ async function validatePackageManifests() {
 
 async function run() {
   await validatePackageManifests();
+  const rootManifest = JSON.parse(
+    await readFile(join(repositoryRoot, "package.json"), "utf8"),
+  );
   const temporaryRoot = await mkdtemp(
     join(tmpdir(), "blackbox-package-smoke-"),
   );
@@ -194,6 +197,11 @@ async function run() {
       maxBuffer: 20 * 1024 * 1024,
     });
     assert.match(help.stdout, /Usage:\s+blackbox/);
+    const version = await execute(binary, ["--version"], {
+      cwd: installDirectory,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    assert.equal(version.stdout.trim(), rootManifest.version);
 
     const installedBin = await readFile(
       join(

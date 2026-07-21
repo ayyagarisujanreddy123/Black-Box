@@ -15,6 +15,7 @@ import {
 } from "@blackbox/daemon";
 
 import type { ResolvedStartConfiguration } from "./configuration.js";
+import { BLACK_BOX_VERSION } from "./version.js";
 
 export type DoctorCheckStatus = "pass" | "warn" | "fail";
 
@@ -231,7 +232,7 @@ async function upstreamCheck(upstream: URL): Promise<DoctorCheck> {
         upstream,
         {
           method: "HEAD",
-          headers: { "user-agent": "blackbox-doctor/0.0.0" },
+          headers: { "user-agent": `blackbox-doctor/${BLACK_BOX_VERSION}` },
         },
         (response) => {
           response.resume();

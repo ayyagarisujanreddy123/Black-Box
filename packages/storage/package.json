@@ -1,6 +1,6 @@
 {
   "name": "@blackbox/storage",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Crash-safe SQLite evidence journal and blob store for Black Box",
   "license": "Apache-2.0",
@@ -24,7 +24,7 @@
     "dist/**/*.d.ts"
   ],
   "dependencies": {
-    "@blackbox/protocol": "0.0.0",
+    "@blackbox/protocol": "0.1.0",
     "better-sqlite3": "12.11.1",
     "zod": "4.4.3"
   }

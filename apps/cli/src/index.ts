@@ -66,6 +66,7 @@ import {
   type SignalEventSource,
 } from "./run/signal-forwarder.js";
 import { WorkspaceObserver } from "./run/workspace-observer.js";
+import { BLACK_BOX_VERSION } from "./version.js";
 
 const HELP = `Black Box — the flight recorder for AI coding agents
 
@@ -88,6 +89,7 @@ Usage:
 Common options:
   --home PATH                     Override the private Black Box data directory
   --help, -h                      Show this help
+  --version, -v                   Show the Black Box version
 
 Start and doctor options:
   --upstream URL                  Provider origin (or BLACKBOX_UPSTREAM_URL)
@@ -1227,6 +1229,13 @@ export async function runCli(
 ): Promise<number> {
   const runtime: CliRuntime = { ...DEFAULT_RUNTIME, ...runtimeOverrides };
   try {
+    if (
+      arguments_.length === 1 &&
+      (arguments_[0] === "--version" || arguments_[0] === "-v")
+    ) {
+      runtime.stdout.write(`${BLACK_BOX_VERSION}\n`);
+      return 0;
+    }
     const parsed = parseCliArguments(arguments_);
     if (parsed.help || parsed.command === undefined) {
       runtime.stdout.write(HELP);
@@ -1284,3 +1293,4 @@ export * from "./run/signal-forwarder.js";
 export * from "./run/workspace-observer.js";
 export * from "./run/workspace-watcher.js";
 export * from "./viewer-assets.js";
+export * from "./version.js";

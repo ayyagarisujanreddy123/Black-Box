@@ -1,6 +1,6 @@
 {
   "name": "@blackbox/daemon",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Local capture, query, archive, and analysis service for Black Box",
   "license": "Apache-2.0",
@@ -24,11 +24,11 @@
     "dist/**/*.d.ts"
   ],
   "dependencies": {
-    "@blackbox/analysis": "0.0.0",
-    "@blackbox/context": "0.0.0",
-    "@blackbox/normalizers": "0.0.0",
-    "@blackbox/protocol": "0.0.0",
-    "@blackbox/storage": "0.0.0",
+    "@blackbox/analysis": "0.1.0",
+    "@blackbox/context": "0.1.0",
+    "@blackbox/normalizers": "0.1.0",
+    "@blackbox/protocol": "0.1.0",
+    "@blackbox/storage": "0.1.0",
     "zod": "4.4.3"
   }
 }

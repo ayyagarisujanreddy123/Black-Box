@@ -1,12 +1,12 @@
 {
   "name": "@blackbox/test-fixtures",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@blackbox/protocol": "0.0.0"
+    "@blackbox/protocol": "0.1.0"
   }
 }

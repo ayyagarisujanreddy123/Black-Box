@@ -116,6 +116,20 @@ afterEach(async () => {
 });
 
 describe("CLI initialization and configuration", () => {
+  it("reports the candidate version without starting the recorder", async () => {
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+
+    expect(await runCli(["--version"], runtime(stdout, stderr))).toBe(0);
+    expect(stdout.value).toBe("0.1.0\n");
+    expect(stderr.value).toBe("");
+
+    stdout.clear();
+    expect(await runCli(["-v"], runtime(stdout, stderr))).toBe(0);
+    expect(stdout.value).toBe("0.1.0\n");
+    expect(stderr.value).toBe("");
+  });
+
   it("initializes private storage idempotently without printing the token", async () => {
     const root = await temporaryRoot();
     const stdout = new CapturedOutput();

@@ -1,6 +1,6 @@
 # Release checklist
 
-Black Box has not been published. Completing a source check is necessary but does not authorize a tag, package publication, signing operation, or update to `origin`.
+Black Box 0.1.0 is an unreleased source candidate. Completing a source check is necessary but does not authorize a tag, package publication, signing operation, or update to `origin`.
 
 ## Automated source gates
 
@@ -38,9 +38,8 @@ It runs the source gate, clean-installs the packed runtime set, audits dependenc
 
 ## Explicit release operations
 
-These steps require separate authorization and configured signing/publishing identity:
+The 0.1.0 candidate version and Apache-2.0 license are already applied. These remaining steps require separate authorization and configured signing/publishing identity:
 
-- choose and apply the release version;
 - create a signed tag;
 - push the candidate commit and tag;
 - publish the npm package with provenance;

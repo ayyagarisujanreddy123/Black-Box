@@ -2,6 +2,8 @@
 
 Black Box is a local flight recorder for AI coding agents. It records observable API traffic, model and tool events, process output, and workspace effects, then connects that evidence in a terminal workflow and browser cockpit.
 
+> Registry publication is deferred. Until an official package release is linked from the project repository, use the source quickstart in the full project documentation.
+
 ## Requirements
 
 - Node.js 22.13 or newer

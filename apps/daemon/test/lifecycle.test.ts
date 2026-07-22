@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect } from "node:net";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -184,6 +184,18 @@ describe("private install credentials", () => {
       "Control token is invalid",
     );
     expect((await stat(paths.tokenPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses a symlinked control-token target", async () => {
+    const root = await temporaryRoot();
+    const paths = resolveDaemonPaths(root);
+    const targetPath = join(root, "target.token");
+    await writeFile(targetPath, "A".repeat(43), { mode: 0o600 });
+    await symlink(targetPath, paths.tokenPath);
+
+    await expect(readControlToken(paths.tokenPath)).rejects.toThrow(
+      "Sensitive path is not a regular file",
+    );
   });
 });
 

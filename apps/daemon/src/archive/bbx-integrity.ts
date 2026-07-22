@@ -1,14 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  chmod,
-  link,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rm,
-  stat,
-} from "node:fs/promises";
+import { chmod, link, mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -275,16 +266,35 @@ export async function readBbxArchiveFile(
   path: string,
   maximumBytes = DEFAULT_MAXIMUM_ARCHIVE_BYTES,
 ): Promise<Uint8Array> {
-  const information = await stat(path);
-  if (!information.isFile()) {
-    throw new BbxArchiveIntegrityError("The BBX archive path is not a file.");
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw new RangeError(
+      "The BBX archive byte limit must be a non-negative integer.",
+    );
   }
-  if (information.size > maximumBytes) {
+  const handle = await open(path, "r");
+  try {
+    const information = await handle.stat();
+    if (!information.isFile()) {
+      throw new BbxArchiveIntegrityError("The BBX archive path is not a file.");
+    }
+    if (information.size > maximumBytes) {
+      throw new BbxArchiveSizeError(maximumBytes);
+    }
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    while (totalBytes <= maximumBytes) {
+      const remaining = maximumBytes + 1 - totalBytes;
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remaining));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+      if (bytesRead === 0) {
+        return Buffer.concat(chunks, totalBytes);
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+      totalBytes += bytesRead;
+    }
     throw new BbxArchiveSizeError(maximumBytes);
+  } finally {
+    await handle.close();
   }
-  const bytes = await readFile(path);
-  if (bytes.byteLength > maximumBytes) {
-    throw new BbxArchiveSizeError(maximumBytes);
-  }
-  return bytes;
 }

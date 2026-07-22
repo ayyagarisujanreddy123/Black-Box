@@ -49,7 +49,7 @@ export function headersForForwarding(
   const explicitlyDropped = new Set(
     (options.dropNames ?? []).map((name) => name.toLowerCase()),
   );
-  const result: OutgoingHttpHeaders = {};
+  const result = new Map<string, string | string[]>();
 
   for (const [originalName, originalValue] of Object.entries(headers)) {
     const name = originalName.toLowerCase();
@@ -62,9 +62,9 @@ export function headersForForwarding(
     ) {
       continue;
     }
-    result[name] = originalValue;
+    result.set(name, originalValue);
   }
-  return result;
+  return Object.fromEntries(result);
 }
 
 export function headersForPersistence(
@@ -76,7 +76,7 @@ export function headersForPersistence(
     ...additionalSensitiveNames.map((name) => name.toLowerCase()),
   ]);
   const connectionSpecific = connectionTokens(headers);
-  const persisted: Record<string, string[]> = {};
+  const persisted = new Map<string, string[]>();
 
   for (const [originalName, originalValue] of Object.entries(headers)) {
     const name = originalName.toLowerCase();
@@ -89,9 +89,9 @@ export function headersForPersistence(
     }
     const normalizedValues = values(originalValue);
     if (normalizedValues.length > 0) {
-      persisted[name] = normalizedValues;
+      persisted.set(name, normalizedValues);
     }
   }
 
-  return SafeHeadersSchema.parse(persisted);
+  return SafeHeadersSchema.parse(Object.fromEntries(persisted));
 }

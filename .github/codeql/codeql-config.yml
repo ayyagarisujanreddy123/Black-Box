@@ -1,0 +1,5 @@
+name: Black Box CodeQL configuration
+
+paths-ignore:
+  - "**/test/**"
+  - "test/**"

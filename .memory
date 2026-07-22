@@ -33,8 +33,8 @@ and Windows jobs for that exact commit. The current production pass adds:
 - `docs/operations.md`, covering the supported local single-user production
   boundary, health, capacity, backup/restore, upgrades, logs, and incidents.
 
-Local verification for this pass completed on 2026-07-22 with 33 unit/contract
-files and 285 passing tests, two packaged end-to-end tests, all seven packed
+Local verification for this pass completed on 2026-07-22 with 34 unit/contract
+files and 291 passing tests, two packaged end-to-end tests, all seven packed
 runtime smoke installations, two offline rehearsals, and zero audit
 vulnerabilities. Recheck the final commit, clean tree, remote CI, and CodeQL run
 rather than assuming those local results prove the state of a later SHA.

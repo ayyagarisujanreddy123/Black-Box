@@ -62,6 +62,12 @@ describe("deterministic incident reports", () => {
     expect(markdown).toContain("blackbox://event/event-file-delete");
     expect(markdown).toContain("## Root-cause hypothesis");
     expect(markdown).toContain("inferred");
+
+    const escaped = renderIncidentReportMarkdown({
+      ...report,
+      impact: String.raw`C:\temp\*artifact*`,
+    });
+    expect(escaped).toContain(String.raw`C:\\temp\\\*artifact\*`);
   });
 
   it("returns stable report identity and a deterministic fallback with no action target", () => {

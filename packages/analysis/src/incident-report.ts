@@ -495,8 +495,7 @@ function escapeMarkdown(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll("\\", "\\\\")
-    .replace(/([`*_{}[\]()#+.!|~-])/gu, "\\$1")
+    .replace(/([\\`*_{}[\]()#+.!|~-])/gu, "\\$1")
     .replace(/\s+/gu, " ")
     .trim();
 }

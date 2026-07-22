@@ -191,9 +191,13 @@ async function requestBytes(
   headers: Record<string, string> = {},
 ): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
+    const destination = new URL(origin);
     const request = httpRequest(
-      new URL(path, origin),
       {
+        protocol: destination.protocol,
+        hostname: destination.hostname,
+        port: destination.port,
+        path,
         method: "POST",
         headers: {
           "content-length": body.length,
@@ -637,6 +641,47 @@ describe("byte-faithful recorder proxy", () => {
     expect(raw.protocol).toBe("unknown-openai-compatible");
     expect(raw.path).toBe("/v1/future-operation");
     expect(raw.query).toEqual({ mode: ["opaque"] });
+  });
+
+  it("keeps absolute-form request targets on the configured upstream", async () => {
+    const upstream = await makeUpstream();
+    const unintended = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+    const body = Buffer.from("absolute-target");
+
+    const result = await requestBytes(
+      proxy.address()?.origin as string,
+      `${unintended.origin}/v1/future-operation?mode=absolute`,
+      body,
+    );
+    await proxy.flush();
+
+    expect(result.status).toBe(201);
+    expect(upstream.observations.at(-1)?.path).toBe(
+      "/v1/future-operation?mode=absolute",
+    );
+    expect(unintended.observations).toHaveLength(0);
+  });
+
+  it("records prototype-shaped query names without property injection", async () => {
+    const upstream = await makeUpstream();
+    const { storage } = await makeStorage();
+    const proxy = await makeProxy(upstream.origin, storage);
+
+    const result = await requestBytes(
+      proxy.address()?.origin as string,
+      "/v1/future-operation?__proto__=one&__proto__=two&constructor=three",
+      Buffer.from("query-keys"),
+    );
+    await proxy.flush();
+
+    expect(result.status).toBe(201);
+    const query = latestRawExchange(storage).query;
+    expect(Object.hasOwn(query, "__proto__")).toBe(true);
+    expect(query["__proto__"]).toEqual(["one", "two"]);
+    expect(Object.hasOwn(query, "constructor")).toBe(true);
+    expect(query["constructor"]).toEqual(["three"]);
   });
 
   it("rewrites a session-scoped wrapper route before forwarding", async () => {

@@ -25,6 +25,8 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 - Repository install scripts are explicitly reviewed and version-pinned for npm's dependency lifecycle policy.
 - `blackbox doctor` opens the evidence database without migration and fails on schema, migration-ledger, or SQLite integrity problems.
 - Daemon log startup rotation retains one private backup and rejects symlinked or non-file log targets.
+- Query and header collection preserves prototype-shaped names without assigning untrusted keys onto ordinary objects.
+- Sensitive control files and imported archives are read through stable file descriptors with enforced byte ceilings.
 
 ### Fixed
 

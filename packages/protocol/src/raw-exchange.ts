@@ -15,19 +15,42 @@ const FORBIDDEN_PERSISTED_HEADERS = new Set([
   "set-cookie",
 ]);
 
-export const SafeHeadersSchema = z
-  .record(z.string().trim().min(1), z.array(z.string()))
-  .superRefine((headers, context) => {
-    for (const headerName of Object.keys(headers)) {
-      if (FORBIDDEN_PERSISTED_HEADERS.has(headerName.toLowerCase())) {
-        context.addIssue({
-          code: "custom",
-          message: `${headerName} must never be persisted`,
-          path: [headerName],
-        });
-      }
+function recordEntries(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null
+    ? Object.entries(value)
+    : value;
+}
+
+function stringArrayRecord(keySchema: z.ZodString) {
+  return z
+    .preprocess(
+      recordEntries,
+      z.array(z.tuple([keySchema, z.array(z.string())])),
+    )
+    .transform(
+      (entries) => Object.fromEntries(entries) as Record<string, string[]>,
+    );
+}
+
+const QueryParametersSchema = stringArrayRecord(z.string());
+
+export const SafeHeadersSchema = stringArrayRecord(
+  z.string().trim().min(1),
+).superRefine((headers, context) => {
+  for (const headerName of Object.keys(headers)) {
+    if (FORBIDDEN_PERSISTED_HEADERS.has(headerName.toLowerCase())) {
+      context.addIssue({
+        code: "custom",
+        message: `${headerName} must never be persisted`,
+        path: [headerName],
+      });
     }
-  });
+  }
+});
 
 export const RawExchangeProtocolSchema = z.enum([
   "openai.responses",
@@ -61,7 +84,7 @@ export const RawExchangeSchema = z
     protocol: RawExchangeProtocolSchema,
     method: z.string().trim().min(1).max(32),
     path: z.string().startsWith("/"),
-    query: z.record(z.string(), z.array(z.string())),
+    query: QueryParametersSchema,
     requestHeaders: SafeHeadersSchema,
     requestBodyRef: BlobReferenceSchema.optional(),
     responseStatus: z.number().int().min(100).max(599).optional(),

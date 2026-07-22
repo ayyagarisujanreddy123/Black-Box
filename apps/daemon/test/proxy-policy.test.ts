@@ -148,4 +148,15 @@ describe("header forwarding and persistence boundaries", () => {
     expect(persisted["x-customer-token"]).toBeUndefined();
     expect(persisted["x-safe"]).toEqual(["keep"]);
   });
+
+  it("preserves prototype-shaped header names as own data properties", () => {
+    const prototypeHeader = Object.fromEntries([["__proto__", "header-value"]]);
+    const forwarded = headersForForwarding(prototypeHeader);
+    const persisted = headersForPersistence(prototypeHeader);
+
+    expect(Object.hasOwn(forwarded, "__proto__")).toBe(true);
+    expect(forwarded["__proto__"]).toBe("header-value");
+    expect(Object.hasOwn(persisted, "__proto__")).toBe(true);
+    expect(persisted["__proto__"]).toEqual(["header-value"]);
+  });
 });

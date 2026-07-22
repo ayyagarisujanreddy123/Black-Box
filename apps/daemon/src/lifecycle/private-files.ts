@@ -1,14 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  chmod,
-  link,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rm,
-} from "node:fs/promises";
+import { chmod, link, lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -86,17 +77,46 @@ export async function replacePrivateFile(
 }
 
 export async function readPrivateTextFile(path: string): Promise<string> {
-  const information = await lstat(path);
-  if (!information.isFile() || information.isSymbolicLink()) {
-    throw new Error(`Sensitive path is not a regular file: ${path}`);
-  }
-  if (information.size > MAX_PRIVATE_TEXT_BYTES) {
+  const handle = await open(path, "r");
+  try {
+    const [information, target] = await Promise.all([
+      handle.stat(),
+      lstat(path),
+    ]);
+    if (
+      !information.isFile() ||
+      !target.isFile() ||
+      target.isSymbolicLink() ||
+      information.dev !== target.dev ||
+      information.ino !== target.ino
+    ) {
+      throw new Error(`Sensitive path is not a regular file: ${path}`);
+    }
+    if (information.size > MAX_PRIVATE_TEXT_BYTES) {
+      throw new Error(
+        `Sensitive file exceeds ${MAX_PRIVATE_TEXT_BYTES} bytes: ${path}`,
+      );
+    }
+    await handle.chmod(PRIVATE_FILE_MODE);
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    while (totalBytes <= MAX_PRIVATE_TEXT_BYTES) {
+      const remaining = MAX_PRIVATE_TEXT_BYTES + 1 - totalBytes;
+      const chunk = Buffer.allocUnsafe(Math.min(16 * 1024, remaining));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+      if (bytesRead === 0) {
+        return Buffer.concat(chunks, totalBytes).toString("utf8");
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+      totalBytes += bytesRead;
+    }
     throw new Error(
       `Sensitive file exceeds ${MAX_PRIVATE_TEXT_BYTES} bytes: ${path}`,
     );
+  } finally {
+    await handle.close();
   }
-  await chmod(path, PRIVATE_FILE_MODE);
-  return readFile(path, "utf8");
 }
 
 export function isMissingFileError(error: unknown): boolean {

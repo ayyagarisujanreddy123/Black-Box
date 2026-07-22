@@ -124,6 +124,9 @@ function parseRequestTarget(
 ): RequestTarget {
   const rawTarget =
     requestUrl === undefined || requestUrl === "*" ? "/" : requestUrl;
+  // Parse absolute-form proxy targets against a sentinel, then carry only their
+  // path and query to the operator-configured upstream. The request target's
+  // origin must never replace the configured provider origin.
   const parsed = new URL(rawTarget, "http://blackbox.invalid");
   const scoped = parseSessionScopedPath(parsed.pathname);
   if (
@@ -133,13 +136,18 @@ function parseRequestTarget(
     throw new TypeError("Invalid session-scoped proxy path.");
   }
   const path = scoped?.path ?? parsed.pathname;
-  const query: Record<string, string[]> = {};
+  const queryEntries = new Map<string, string[]>();
   for (const [name, value] of parsed.searchParams) {
-    (query[name] ??= []).push(value);
+    const existing = queryEntries.get(name);
+    if (existing === undefined) {
+      queryEntries.set(name, [value]);
+    } else {
+      existing.push(value);
+    }
   }
   return {
     path,
-    query,
+    query: Object.fromEntries(queryEntries),
     upstreamUrl: new URL(`${path}${parsed.search}`, upstream),
     ...(scoped === undefined ? {} : { sessionId: scoped.sessionId }),
   };

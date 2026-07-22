@@ -1190,8 +1190,8 @@ This runs formatting, linting, strict typechecking, unit/contract tests, a produ
 
 At the 0.1.0 candidate checkpoint, the local gate passed:
 
-- 33 unit/contract test files;
-- 285 unit/contract tests;
+- 34 unit/contract test files;
+- 291 unit/contract tests;
 - two packaged end-to-end tests.
 
 The tests cover protocol fidelity, malformed/unknown input, credential exclusion, storage recovery, migrations, blobs, sessionization, process/workspace effects, query auth, live streams, viewer safety, context completeness, blame controls, anomalies, report consent/fallback, archive integrity/read-only import, retention, and demo behavior.

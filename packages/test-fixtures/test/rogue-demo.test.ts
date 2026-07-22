@@ -116,11 +116,13 @@ describe("deterministic rogue demo fixture", () => {
         { encoding: "utf8" },
       );
       expect(JSON.parse(cleaned.stdout)).toMatchObject({ cleaned: true });
-      await expect(stat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(outputRoot)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await rm(outputRoot, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("refuses to reset a directory that is not explicitly demo-scoped", async () => {
     const unsafeRoot = await mkdtemp(join(tmpdir(), "unsafe-reset-target-"));

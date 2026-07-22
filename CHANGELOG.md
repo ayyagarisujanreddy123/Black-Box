@@ -13,6 +13,8 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 - Deterministic blame ranking, anomaly detection, incident reports, and explicit opt-in AI narrative enrichment with evidence minimization and consent binding.
 - Tamper-evident share and forensic `.bbx` archives with strict verification and database-enforced read-only imports.
 - Repeatable offline incident demo, measured local performance harness, cross-platform CI definition, clean-install package smoke testing, and release-candidate preflight.
+- A production operations runbook covering local deployment, health, capacity, backup/restore, upgrades, logs, and incident handling.
+- CodeQL scanning and weekly Dependabot update configuration, with third-party GitHub Actions pinned to immutable revisions.
 
 ### Security and privacy
 
@@ -21,6 +23,8 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 - Recorded markup remains inert, optional external analysis is disabled by default, and imported evidence cannot trigger analysis or replay.
 - Apache-2.0 licensing and generated third-party notices are included in future runtime package contents.
 - Repository install scripts are explicitly reviewed and version-pinned for npm's dependency lifecycle policy.
+- `blackbox doctor` opens the evidence database without migration and fails on schema, migration-ledger, or SQLite integrity problems.
+- Daemon log startup rotation retains one private backup and rejects symlinked or non-file log targets.
 
 ### Fixed
 

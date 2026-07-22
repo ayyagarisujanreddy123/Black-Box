@@ -14,6 +14,7 @@ import {
   type DaemonLockRecord,
 } from "@blackbox/daemon";
 import { MINIMUM_NODE_VERSION } from "@blackbox/protocol";
+import { LATEST_SCHEMA_VERSION, openBlackBoxStorage } from "@blackbox/storage";
 
 import type { ResolvedStartConfiguration } from "./configuration.js";
 import { BLACK_BOX_VERSION } from "./version.js";
@@ -165,6 +166,70 @@ async function tokenCheck(
           ? error.message
           : String(error),
     };
+  }
+}
+
+async function databaseCheck(
+  configuration: ResolvedStartConfiguration,
+): Promise<DoctorCheck> {
+  try {
+    await stat(configuration.paths.databasePath);
+  } catch (error: unknown) {
+    const missing =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT";
+    return {
+      id: "database",
+      status: missing ? "warn" : "fail",
+      message: missing
+        ? "not initialized; run blackbox init"
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    };
+  }
+
+  let storage: Awaited<ReturnType<typeof openBlackBoxStorage>> | undefined;
+  try {
+    storage = await openBlackBoxStorage({
+      databasePath: configuration.paths.databasePath,
+      dataDirectory: configuration.paths.dataDirectory,
+      readOnly: true,
+      allowNewerReadOnly: true,
+      recoverIncompleteExchanges: false,
+    });
+    const integrity = storage.integrityCheck();
+    if (integrity !== "ok") {
+      return {
+        id: "database",
+        status: "fail",
+        message: `SQLite integrity check returned '${integrity}'`,
+      };
+    }
+    if (storage.schemaVersion !== LATEST_SCHEMA_VERSION) {
+      return {
+        id: "database",
+        status: "fail",
+        message:
+          `schema version ${storage.schemaVersion} does not match supported ` +
+          `version ${LATEST_SCHEMA_VERSION}`,
+      };
+    }
+    return {
+      id: "database",
+      status: "pass",
+      message: `SQLite integrity is clean at schema version ${storage.schemaVersion}`,
+    };
+  } catch (error: unknown) {
+    return {
+      id: "database",
+      status: "fail",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    storage?.close();
   }
 }
 
@@ -346,6 +411,7 @@ export async function runDoctor(
   const checks: DoctorCheck[] = [
     nodeRuntimeCheck(),
     await storageCheck(configuration, platform),
+    await databaseCheck(configuration),
     await tokenCheck(configuration, platform),
     lock.check,
   ];

@@ -1262,6 +1262,7 @@ describe("CLI doctor", () => {
       expect.arrayContaining([
         expect.objectContaining({ id: "node-runtime", status: "pass" }),
         expect.objectContaining({ id: "storage", status: "pass" }),
+        expect.objectContaining({ id: "database", status: "pass" }),
         expect.objectContaining({ id: "upstream", status: "pass" }),
         expect.objectContaining({ id: "proxy-port", status: "fail" }),
         expect.objectContaining({ id: "capture-limits", status: "pass" }),
@@ -1349,6 +1350,45 @@ describe("CLI doctor", () => {
     };
     expect(websocket.checks).toContainEqual(
       expect.objectContaining({ id: "websocket-transport", status: "fail" }),
+    );
+    expect(stderr.value).toBe("");
+  });
+
+  it("fails when the evidence database is corrupt", async () => {
+    const root = await temporaryRoot();
+    const upstreamOrigin = await upstream();
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const cliRuntime = runtime(stdout, stderr);
+
+    expect(await runCli(["init", "--home", root], cliRuntime)).toBe(0);
+    await writeFile(resolveDaemonPaths(root).databasePath, "not sqlite", {
+      mode: 0o600,
+    });
+    stdout.clear();
+
+    expect(
+      await runCli(
+        [
+          "doctor",
+          "--home",
+          root,
+          "--upstream",
+          upstreamOrigin,
+          "--proxy-port",
+          "0",
+          "--control-port",
+          "0",
+          "--json",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(1);
+    const report = JSON.parse(stdout.value) as {
+      checks: { id: string; status: string }[];
+    };
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({ id: "database", status: "fail" }),
     );
     expect(stderr.value).toBe("");
   });

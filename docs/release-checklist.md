@@ -18,6 +18,8 @@ The checked-in [CI workflow](../.github/workflows/ci.yml) defines three boundari
 
 The matrix uses `fail-fast: false` so one platform cannot hide another platform's result. It grants only read access to repository contents and has no publish credentials or deployment step. A workflow file is not evidence that those jobs passed: record the run URL and immutable commit SHA after it executes on GitHub.
 
+The separate CodeQL workflow scans JavaScript and TypeScript on pushes, pull requests, manual dispatches, and a weekly schedule. Dependabot checks npm and GitHub Actions weekly. All third-party actions are pinned to immutable commit revisions; review Dependabot updates before merging them.
+
 ## Before a release candidate
 
 Run the read-only aggregate preflight first:

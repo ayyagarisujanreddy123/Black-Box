@@ -1,4 +1,4 @@
-import { chmod, mkdir, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
@@ -28,6 +28,7 @@ import {
 export interface OpenStorageOptions {
   readonly databasePath: string;
   readonly dataDirectory?: string;
+  readonly readOnly?: boolean;
   readonly allowNewerReadOnly?: boolean;
   readonly recoverIncompleteExchanges?: boolean;
   readonly blobStore?: BlobStoreOptions;
@@ -120,6 +121,43 @@ async function openDatabase(
   databasePath: string,
   dataDirectory: string,
 ): Promise<OpenedDatabase> {
+  if (options.readOnly === true) {
+    const information = await lstat(databasePath);
+    if (information.isSymbolicLink() || !information.isFile()) {
+      throw new Error(
+        `Read-only database path is not a regular file: ${databasePath}`,
+      );
+    }
+    const database = new Database(databasePath, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    try {
+      configureReadOnlyDatabase(database);
+      const currentVersion = getUserVersion(database);
+      if (
+        currentVersion > LATEST_SCHEMA_VERSION &&
+        options.allowNewerReadOnly !== true
+      ) {
+        throw new StorageCompatibilityError(
+          currentVersion,
+          LATEST_SCHEMA_VERSION,
+        );
+      }
+      verifyMigrationChecksums(database);
+      return {
+        database,
+        readOnly: true,
+        schemaVersion: currentVersion,
+      };
+    } catch (error: unknown) {
+      if (database.open) {
+        database.close();
+      }
+      throw error;
+    }
+  }
+
   const existingSize = await pathSize(databasePath);
   let database = new Database(databasePath);
 
@@ -247,14 +285,18 @@ export async function openBlackBoxStorage(
   const dataDirectory = resolve(
     options.dataDirectory ?? join(dirname(databasePath), "blackbox-data"),
   );
-  await mkdir(dirname(databasePath), { recursive: true, mode: 0o700 });
-  await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
-  await chmod(dataDirectory, 0o700);
+  if (options.readOnly !== true) {
+    await mkdir(dirname(databasePath), { recursive: true, mode: 0o700 });
+    await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+    await chmod(dataDirectory, 0o700);
+  }
 
   const opened = await openDatabase(options, databasePath, dataDirectory);
-  await setPrivateFileMode(databasePath);
-  await setPrivateFileMode(`${databasePath}-wal`);
-  await setPrivateFileMode(`${databasePath}-shm`);
+  if (options.readOnly !== true) {
+    await setPrivateFileMode(databasePath);
+    await setPrivateFileMode(`${databasePath}-wal`);
+    await setPrivateFileMode(`${databasePath}-shm`);
+  }
 
   try {
     const blobStore = new BlobStore(

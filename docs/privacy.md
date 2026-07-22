@@ -16,6 +16,8 @@ Depending on capture level and configured bounds, the private Black Box home can
 
 SQLite uses WAL mode and payloads use a content-addressed blob store. The home, token, database and exported archives are created with restrictive permissions where the host supports POSIX modes. On Windows, `blackbox doctor` verifies that storage and the control token are usable but warns that Node.js cannot verify POSIX owner/group/other mode separation; protect the account and profile directory with appropriate Windows access controls. Set the location with `--home` or `BLACKBOX_HOME`.
 
+Operational daemon output is limited to lifecycle and error summaries rather than request headers or bodies. On startup, `daemon.log` rotates at 1 MiB to one private `daemon.log.1` backup, and symlinked or non-file log targets are refused. Logs can still contain local paths, provider origins, or error text and must be handled as sensitive.
+
 ## Credentials and redaction
 
 Authorization, proxy-authorization, cookie, set-cookie and configured sensitive header values are excluded from persisted header evidence. Credentials may still appear inside request bodies, model text, source files, tool output or terminal output. Known credential filenames are hash-only, oversized file content is omitted, and recognized secret patterns are redacted before optional AI transmission or `share` export.

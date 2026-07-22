@@ -5,6 +5,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -199,6 +200,50 @@ describe("database lifecycle and migrations", () => {
       storage.unsafeDatabase.exec("ROLLBACK");
       reader.close();
     }
+  });
+
+  it("opens an existing store explicitly without writes or migrations", async () => {
+    const { storage, root } = await openTestStorage();
+    storage.sessions.create(session());
+    const databasePath = storage.databasePath;
+    const dataDirectory = join(root, "unused-read-only-data");
+    storage.close();
+    openedStorages.splice(openedStorages.indexOf(storage), 1);
+
+    const readOnly = await openBlackBoxStorage({
+      databasePath,
+      dataDirectory,
+      readOnly: true,
+    });
+    openedStorages.push(readOnly);
+
+    expect(readOnly.readOnly).toBe(true);
+    expect(readOnly.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
+    expect(readOnly.integrityCheck()).toBe("ok");
+    expect(readOnly.sessions.get("session-storage")?.id).toBe(
+      "session-storage",
+    );
+    expect(() =>
+      readOnly.unsafeDatabase.exec("CREATE TABLE forbidden(value TEXT)"),
+    ).toThrow();
+    await expect(stat(dataDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses a symlinked read-only database target", async () => {
+    const { storage, root } = await openTestStorage();
+    const databasePath = storage.databasePath;
+    const linkPath = join(root, "linked.sqlite");
+    storage.close();
+    openedStorages.splice(openedStorages.indexOf(storage), 1);
+    await symlink(databasePath, linkPath);
+
+    await expect(
+      openBlackBoxStorage({
+        databasePath: linkPath,
+        dataDirectory: join(root, "unused-read-only-data"),
+        readOnly: true,
+      }),
+    ).rejects.toThrow("Read-only database path is not a regular file");
   });
 
   it("rolls back every migration in a failed migration transaction", () => {

@@ -434,22 +434,22 @@ On 2026-07-21, the reproducible 100-sample loopback benchmark measured 6.031 ms 
 
 ## CLI reference
 
-| Command                                                | Purpose                                                         |
-| ------------------------------------------------------ | --------------------------------------------------------------- |
-| `blackbox init [--home PATH]`                          | Create the private local data area                              |
-| `blackbox doctor [--upstream URL] [--json]`            | Check runtime, ports, storage, upstream, and transport support  |
-| `blackbox start [--upstream URL]`                      | Start the detached proxy and control server                     |
-| `blackbox run [--cwd PATH] -- <command...>`            | Run one agent/process with API, process, and workspace evidence |
-| `blackbox status [--json]`                             | Show daemon and recorder health                                 |
-| `blackbox open [session-id]`                           | Start/reuse the daemon and open the authenticated cockpit       |
-| `blackbox sessions [--limit N] [--json]`               | List recorded sessions                                          |
-| `blackbox inspect <session-id> [--type TYPE] [--json]` | Read canonical events from the terminal                         |
-| `blackbox report <session-id> [--ai] [--json]`         | Generate an offline report or explicitly opt into AI enrichment |
-| `blackbox export <session-id> --output FILE`           | Create a redacted or explicit forensic `.bbx` archive           |
-| `blackbox import <archive.bbx> [--json]`               | Verify and install a read-only investigation                    |
-| `blackbox delete <session-id> [--yes]`                 | Preview or apply deletion of one investigation                  |
-| `blackbox prune [--older-than-days N] [--max-bytes N]` | Preview or apply an age/size retention plan                     |
-| `blackbox stop [--timeout-ms MS]`                      | Stop the daemon with bounded cleanup                            |
+| Command                                                | Purpose                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------- |
+| `blackbox init [--home PATH]`                          | Create the private local data area                               |
+| `blackbox doctor [--upstream URL] [--json]`            | Check runtime, database, storage, upstream, and transport health |
+| `blackbox start [--upstream URL]`                      | Start the detached proxy and control server                      |
+| `blackbox run [--cwd PATH] -- <command...>`            | Run one agent/process with API, process, and workspace evidence  |
+| `blackbox status [--json]`                             | Show daemon and recorder health                                  |
+| `blackbox open [session-id]`                           | Start/reuse the daemon and open the authenticated cockpit        |
+| `blackbox sessions [--limit N] [--json]`               | List recorded sessions                                           |
+| `blackbox inspect <session-id> [--type TYPE] [--json]` | Read canonical events from the terminal                          |
+| `blackbox report <session-id> [--ai] [--json]`         | Generate an offline report or explicitly opt into AI enrichment  |
+| `blackbox export <session-id> --output FILE`           | Create a redacted or explicit forensic `.bbx` archive            |
+| `blackbox import <archive.bbx> [--json]`               | Verify and install a read-only investigation                     |
+| `blackbox delete <session-id> [--yes]`                 | Preview or apply deletion of one investigation                   |
+| `blackbox prune [--older-than-days N] [--max-bytes N]` | Preview or apply an age/size retention plan                      |
+| `blackbox stop [--timeout-ms MS]`                      | Stop the daemon with bounded cleanup                             |
 
 See the complete option list with:
 
@@ -550,11 +550,12 @@ Version 0.1.0 is the current unreleased source candidate. The core capabilities 
 - Tamper-evident share/forensic archives and read-only import
 - Explicit retention, safe blob collection, and repeatable offline demo rehearsal
 
-This is not a claim that a public package release is complete. Cross-platform clean-install validation, fallback media, signing, and release tagging remain release-operations work.
+The application is designed for local, single-user production operation; see the operations runbook for deployment, health, backup, retention, upgrade, and incident procedures. This is not a claim that a public package release is complete. npm identity, publication, registry-install verification, signing, and release tagging remain separate release operations.
 
 For the detailed product contract and milestone acceptance criteria, see:
 
 - [Complete project guide](./docs/complete-project-guide.md)
+- [Production operations runbook](./docs/operations.md)
 - [design.md](./design.md)
 - [plan.md](./plan.md)
 - [Capture model](./docs/capture-model.md)

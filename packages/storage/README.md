@@ -24,6 +24,9 @@ Opening a writable store enables WAL, validates the migration ledger, applies
 pending migrations after a backup, removes orphan temporary blobs, and marks
 interrupted exchanges as incomplete. Pass `allowNewerReadOnly: true` only when
 query-only access to a future schema is preferable to a compatibility error.
+Pass `readOnly: true` to require an existing database, skip directory creation and
+migrations, enable SQLite query-only mode, and verify the recorded migration
+checksums. This is the appropriate path for non-mutating health inspection.
 
 Blob reads always verify stored length, decoded length, and SHA-256.
 `unsafeDatabase` exists for diagnostics and low-level tests; application code

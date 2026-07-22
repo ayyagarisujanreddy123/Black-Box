@@ -9,6 +9,43 @@ Product documentation remains authoritative for implementation details. Never pu
 passwords, npm tokens, 2FA codes, signing keys, API keys, control tokens, or
 captured user evidence in this file.
 
+## Latest direction: local production readiness
+
+This section supersedes older hackathon/demo priorities and the older statement
+that new commits should remain local. On 2026-07-22, the user explicitly stopped
+the hackathon track and made a production-ready application the goal. In the same
+conversation, the user explicitly requested pushes to `origin/main` and asked that
+CI failures be investigated and fixed. Future sessions must still recheck external
+state and must not treat that past authorization as permission for npm publication,
+tagging, releases, or unrelated external changes.
+
+Before the production-hardening continuation, `main` and `origin/main` were clean
+and synchronized at `1726f6d123778979006c1b2f36d62ef839b4d561`. GitHub Actions run
+`29813012194` was green across quality, minimum Node, and packaged Ubuntu, macOS,
+and Windows jobs for that exact commit. The current production pass adds:
+
+- a non-mutating storage open path and a `doctor` check for migration-ledger,
+  schema, and SQLite integrity failures;
+- private daemon log startup rotation with one backup and refusal of symlinked or
+  non-file targets;
+- immutable SHA pins for third-party GitHub Actions, CodeQL scanning, and weekly
+  Dependabot configuration;
+- `docs/operations.md`, covering the supported local single-user production
+  boundary, health, capacity, backup/restore, upgrades, logs, and incidents.
+
+Local verification for this pass completed on 2026-07-22 with 33 unit/contract
+files and 285 passing tests, two packaged end-to-end tests, all seven packed
+runtime smoke installations, two offline rehearsals, and zero audit
+vulnerabilities. Recheck the final commit, clean tree, remote CI, and CodeQL run
+rather than assuming those local results prove the state of a later SHA.
+
+The seven runtime `private: true` flags remain deliberate publication locks. npm
+was not authenticated, and npm E404 responses did not prove control of the
+`@blackbox` scope. Do not remove those locks or publish anything until identity and
+scope ownership are proven. Repository governance also still requires an explicit
+owner decision: main had no branch protection/ruleset, and dependency graph,
+vulnerability alerts, and Dependabot security updates were disabled when audited.
+
 ## Resume protocol
 
 1. Read this file in full.

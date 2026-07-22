@@ -2,7 +2,7 @@
 
 > Version 0.1.0 — unreleased source candidate
 >
-> Last updated: 2026-07-20
+> Last updated: 2026-07-22
 
 This document explains Black Box from the beginning. It is written for someone who has never seen the project, has not read its design documents, and may not already understand AI-agent observability.
 
@@ -883,7 +883,7 @@ The home contains:
 - `daemon.lock` — daemon identity and listener state;
 - `blackbox.sqlite` plus SQLite side files;
 - `data/` — content-addressed payload blobs;
-- `logs/daemon.log` — private operational daemon output; manage this file according to local retention needs.
+- `logs/daemon.log` and `daemon.log.1` — private operational daemon output; a log at or above 1 MiB rotates on daemon startup and unsafe log targets are rejected.
 
 Where POSIX permissions are supported, private directories use mode `0700` and sensitive files use `0600`.
 
@@ -1190,8 +1190,8 @@ This runs formatting, linting, strict typechecking, unit/contract tests, a produ
 
 At the 0.1.0 candidate checkpoint, the local gate passed:
 
-- 32 unit/contract test files;
-- 279 unit/contract tests;
+- 33 unit/contract test files;
+- 285 unit/contract tests;
 - two packaged end-to-end tests.
 
 The tests cover protocol fidelity, malformed/unknown input, credential exclusion, storage recovery, migrations, blobs, sessionization, process/workspace effects, query auth, live streams, viewer safety, context completeness, blame controls, anomalies, report consent/fallback, archive integrity/read-only import, retention, and demo behavior.
@@ -1204,7 +1204,7 @@ The tests cover protocol fidelity, malformed/unknown input, credential exclusion
 - build and unit compatibility at the minimum Node.js 22.15;
 - native dependency installation, packaged lifecycle tests, and package smoke installation on Ubuntu, macOS, and Windows.
 
-The workflow has read-only repository permissions and no publication step or credentials. Because this source work has not been pushed as part of the current local continuation, the workflow definition must not be confused with a recorded remote CI success for the current SHA.
+The workflow has read-only repository permissions and no publication step or credentials. A workflow definition is not evidence of a pass: production and release records must link a successful remote run for the exact deployed commit SHA. A separate pinned CodeQL workflow scans JavaScript and TypeScript, and Dependabot checks npm and GitHub Actions weekly.
 
 ### Package smoke test
 
@@ -1436,6 +1436,7 @@ These are future directions, not 0.1.0 capabilities.
 - [Adapter authoring](adapter-authoring.md) — supported session integration contract and limits
 - [Protocol support](protocol-support.md) — supported routes/transports and fidelity boundaries
 - [Privacy guide](privacy.md) — stored data, credentials, network behavior, deletion
+- [Production operations](operations.md) — deployment, health, retention, backup, upgrade, and incident response
 - [Archive format](archive-format.md) — exact `.bbx` schema and verification
 - [Performance results](performance.md) — reproducible benchmark method and limits
 - [Demo script](demo-script.md) — three-minute, seven-minute, and fallback paths

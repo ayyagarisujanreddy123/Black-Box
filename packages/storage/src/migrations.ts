@@ -524,7 +524,7 @@ BEGIN
 END;
 `;
 
-const SCRUB_API_KEY_HEADERS_SQL = String.raw`
+const REMOVE_FORBIDDEN_HEADER_FIELDS_SQL = String.raw`
 PRAGMA secure_delete = ON;
 
 UPDATE raw_exchanges
@@ -603,7 +603,11 @@ export const MIGRATIONS: readonly Migration[] = [
     "complete-imported-session-readonly-guards",
     IMPORTED_READONLY_COMPLETE_GUARDS_SQL,
   ),
-  defineMigration(4, "scrub-api-key-headers", SCRUB_API_KEY_HEADERS_SQL),
+  defineMigration(
+    4,
+    "remove-forbidden-header-fields",
+    REMOVE_FORBIDDEN_HEADER_FIELDS_SQL,
+  ),
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

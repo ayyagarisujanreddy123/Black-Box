@@ -121,6 +121,7 @@ function fixtureStatus(): DaemonStatus {
     startedAt: "2026-07-16T12:00:00.000Z",
     proxyOrigin: "http://127.0.0.1:4141",
     controlOrigin: "http://127.0.0.1:4142",
+    upstreamOrigin: "https://api.openai.com",
     proxy: {
       status: "healthy",
       activeRequests: 0,
@@ -469,6 +470,7 @@ describe("daemon lifecycle integration", () => {
 
     expect(status).toMatchObject({
       state: "ready",
+      upstreamOrigin: upstream,
       proxy: { status: "healthy" },
       storage: { readOnly: false },
     });

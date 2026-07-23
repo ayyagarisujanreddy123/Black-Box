@@ -524,6 +524,73 @@ BEGIN
 END;
 `;
 
+const SCRUB_API_KEY_HEADERS_SQL = String.raw`
+PRAGMA secure_delete = ON;
+
+UPDATE raw_exchanges
+SET request_headers_json = COALESCE(
+      (
+        SELECT json_group_object(key, json(value))
+        FROM json_each(raw_exchanges.request_headers_json)
+        WHERE lower(key) <> 'x-api-key'
+      ),
+      '{}'
+    ),
+    record_json = json_set(
+      record_json,
+      '$.requestHeaders',
+      json(
+        COALESCE(
+          (
+            SELECT json_group_object(key, json(value))
+            FROM json_each(
+              json_extract(raw_exchanges.record_json, '$.requestHeaders')
+            )
+            WHERE lower(key) <> 'x-api-key'
+          ),
+          '{}'
+        )
+      )
+    )
+WHERE EXISTS (
+  SELECT 1
+  FROM json_each(raw_exchanges.request_headers_json)
+  WHERE lower(key) = 'x-api-key'
+);
+
+UPDATE raw_exchanges
+SET response_headers_json = COALESCE(
+      (
+        SELECT json_group_object(key, json(value))
+        FROM json_each(raw_exchanges.response_headers_json)
+        WHERE lower(key) <> 'x-api-key'
+      ),
+      '{}'
+    ),
+    record_json = json_set(
+      record_json,
+      '$.responseHeaders',
+      json(
+        COALESCE(
+          (
+            SELECT json_group_object(key, json(value))
+            FROM json_each(
+              json_extract(raw_exchanges.record_json, '$.responseHeaders')
+            )
+            WHERE lower(key) <> 'x-api-key'
+          ),
+          '{}'
+        )
+      )
+    )
+WHERE response_headers_json IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM json_each(raw_exchanges.response_headers_json)
+    WHERE lower(key) = 'x-api-key'
+  );
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   defineMigration(1, "initial-evidence-schema", INITIAL_SCHEMA_SQL),
   defineMigration(
@@ -536,6 +603,7 @@ export const MIGRATIONS: readonly Migration[] = [
     "complete-imported-session-readonly-guards",
     IMPORTED_READONLY_COMPLETE_GUARDS_SQL,
   ),
+  defineMigration(4, "scrub-api-key-headers", SCRUB_API_KEY_HEADERS_SQL),
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

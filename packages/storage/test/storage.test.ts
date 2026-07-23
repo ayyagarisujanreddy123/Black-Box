@@ -30,6 +30,7 @@ import {
   ChunkManifestBuilder,
   ChunkManifestSchema,
   LATEST_SCHEMA_VERSION,
+  MIGRATIONS,
   MigrationError,
   StorageCapacityError,
   StorageCompatibilityError,
@@ -301,6 +302,121 @@ describe("database lifecycle and migrations", () => {
       backup.prepare("SELECT value FROM legacy_marker").pluck().get(),
     ).toBe("present");
     backup.close();
+  });
+
+  it("scrubs previously persisted Anthropic API key headers", async () => {
+    const root = await makeRoot();
+    const databasePath = join(root, "headers-v3.sqlite");
+    const legacy = new Database(databasePath);
+    applyMigrations(legacy, MIGRATIONS.slice(0, 3), TIME);
+    const legacySession = session("session-legacy-headers");
+    legacy
+      .prepare(
+        `INSERT INTO sessions(
+           id, schema_version, started_at, status, capture_level, models_json,
+           tags_json, event_count, error_count, input_tokens, output_tokens,
+           metadata_json, record_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        legacySession.id,
+        legacySession.schemaVersion,
+        legacySession.startedAt,
+        legacySession.status,
+        legacySession.captureLevel,
+        JSON.stringify(legacySession.models),
+        JSON.stringify(legacySession.tags),
+        0,
+        0,
+        null,
+        null,
+        JSON.stringify(legacySession.metadata),
+        JSON.stringify(legacySession),
+        TIME,
+        TIME,
+      );
+    const secret = "sk-ant-legacy-header-secret";
+    const legacyExchange = {
+      schemaVersion: 1,
+      id: "exchange-legacy-headers",
+      sessionId: legacySession.id,
+      sequence: 1,
+      protocol: "unknown-openai-compatible",
+      method: "POST",
+      path: "/v1/messages",
+      query: {},
+      requestHeaders: {
+        "X-API-Key": [secret],
+        "content-type": ["application/json"],
+      },
+      responseStatus: 200,
+      responseHeaders: {
+        "x-api-key": ["response-secret"],
+        "request-id": ["req_fixture"],
+      },
+      startedAt: TIME,
+      endedAt: LATER,
+      outcome: "completed",
+      parseStatus: "unsupported",
+      capture: {
+        requestComplete: true,
+        responseComplete: true,
+        droppedRequestBytes: 0,
+        droppedResponseBytes: 0,
+      },
+    };
+    legacy
+      .prepare(
+        `INSERT INTO raw_exchanges(
+           id, session_id, sequence, protocol, method, path, query_json,
+           request_headers_json, response_status, response_headers_json,
+           started_at, ended_at, outcome, parse_status, journal_state,
+           record_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        legacyExchange.id,
+        legacyExchange.sessionId,
+        legacyExchange.sequence,
+        legacyExchange.protocol,
+        legacyExchange.method,
+        legacyExchange.path,
+        JSON.stringify(legacyExchange.query),
+        JSON.stringify(legacyExchange.requestHeaders),
+        legacyExchange.responseStatus,
+        JSON.stringify(legacyExchange.responseHeaders),
+        legacyExchange.startedAt,
+        legacyExchange.endedAt,
+        legacyExchange.outcome,
+        legacyExchange.parseStatus,
+        "complete",
+        JSON.stringify(legacyExchange),
+        TIME,
+        TIME,
+      );
+    legacy.close();
+
+    const storage = await openBlackBoxStorage({
+      databasePath,
+      dataDirectory: join(root, "data"),
+      now: () => new Date(TIME),
+    });
+    openedStorages.push(storage);
+    const migrated = storage.rawExchanges.getRequired(legacyExchange.id);
+
+    expect(storage.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
+    expect(migrated.requestHeaders).toEqual({
+      "content-type": ["application/json"],
+    });
+    expect(migrated.responseHeaders).toEqual({
+      "request-id": ["req_fixture"],
+    });
+    expect(
+      storage.unsafeDatabase
+        .prepare("SELECT request_headers_json FROM raw_exchanges WHERE id = ?")
+        .pluck()
+        .get(legacyExchange.id),
+    ).not.toContain("api-key");
   });
 
   it("rejects a newer schema unless query-only access is explicit", async () => {

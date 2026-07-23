@@ -53,6 +53,7 @@ async function requestBytes(
   body: Buffer,
   secret: string,
   cookie: string,
+  apiKey: string,
 ): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
@@ -62,6 +63,7 @@ async function requestBytes(
         headers: {
           authorization: secret,
           cookie,
+          "x-api-key": apiKey,
           "content-type": "application/json",
           "content-length": body.length,
         },
@@ -253,12 +255,20 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     const body = Buffer.from('{"input":"packaged-e2e"}', "utf8");
     const secret = "Bearer sk-packaged-e2e-never-persist";
     const cookie = "session=packaged-e2e-never-persist";
-    const direct = await requestBytes(upstreamOrigin, body, secret, cookie);
+    const apiKey = "sk-ant-packaged-e2e-never-persist";
+    const direct = await requestBytes(
+      upstreamOrigin,
+      body,
+      secret,
+      cookie,
+      apiKey,
+    );
     const recorded = await requestBytes(
       status.proxyOrigin,
       body,
       secret,
       cookie,
+      apiKey,
     );
     expect(recorded.status).toBe(direct.status);
     expect(recorded.body).toEqual(direct.body);
@@ -266,6 +276,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     expect(recorded.headers["set-cookie"]).toEqual(["provider=e2e; HttpOnly"]);
     expect(observations.at(-1)?.headers.authorization).toBe(secret);
     expect(observations.at(-1)?.headers.cookie).toBe(cookie);
+    expect(observations.at(-1)?.headers["x-api-key"]).toBe(apiKey);
 
     const doctor = await runCli([
       "doctor",
@@ -366,6 +377,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     expect(wrappedOutput.proxyOrigin).toBe(status.proxyOrigin);
 
     let wrappedInspection: Inspection | undefined;
+    let lastWrappedEventTypes: string[] = [];
     const wrappedDeadline = Date.now() + 2_000;
     while (Date.now() < wrappedDeadline) {
       const candidate = JSON.parse(
@@ -380,6 +392,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
         ).stdout,
       ) as Inspection;
       const types = candidate.events.map((event) => event.type);
+      lastWrappedEventTypes = types;
       if (
         types.includes("model.response.completed") &&
         types.includes("file.delete") &&
@@ -390,7 +403,10 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    expect(wrappedInspection).toBeDefined();
+    expect(
+      wrappedInspection,
+      `wrapped session did not finalize; last event types: ${lastWrappedEventTypes.join(", ")}`,
+    ).toBeDefined();
 
     const packagedReportCommand = await runCli([
       "report",
@@ -440,6 +456,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
         status: "completed",
         captureLevel: "wrapped-process",
         repoRoot: await realpath(workspace),
+        upstreamOrigin,
       });
       const wrappedEvents = storage.events.list(wrappedOutput.sessionId, {
         limit: 1000,
@@ -494,6 +511,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
       expect(raw.outcome).toBe("completed");
       expect(raw.requestHeaders.authorization).toBeUndefined();
       expect(raw.requestHeaders.cookie).toBeUndefined();
+      expect(raw.requestHeaders["x-api-key"]).toBeUndefined();
       expect(raw.responseHeaders?.["set-cookie"]).toBeUndefined();
       expect(
         Buffer.from(await storage.blobs.get(raw.requestBodyRef?.id as string)),
@@ -504,7 +522,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
 
       storage.checkpoint("TRUNCATE");
       const database = await readFile(storage.databasePath);
-      for (const forbidden of [secret, cookie, token]) {
+      for (const forbidden of [secret, cookie, apiKey, token]) {
         expect(database.includes(Buffer.from(forbidden))).toBe(false);
       }
       const blobIds = storage.unsafeDatabase
@@ -512,7 +530,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
         .all() as { id: string }[];
       for (const { id } of blobIds) {
         const blob = Buffer.from(await storage.blobs.get(id));
-        for (const forbidden of [secret, cookie, token]) {
+        for (const forbidden of [secret, cookie, apiKey, token]) {
           expect(blob.includes(Buffer.from(forbidden))).toBe(false);
         }
       }
@@ -523,6 +541,7 @@ it("runs the packaged CLI and detached recorder end to end", async () => {
     const daemonLog = await readFile(join(root, "logs", "daemon.log"), "utf8");
     expect(daemonLog).not.toContain(secret);
     expect(daemonLog).not.toContain(cookie);
+    expect(daemonLog).not.toContain(apiKey);
     expect(daemonLog).not.toContain(token);
     expect(daemonLog).not.toContain("sk-environment-must-not-reach-daemon");
   } finally {

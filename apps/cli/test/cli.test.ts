@@ -453,6 +453,187 @@ describe("CLI daemon lifecycle", () => {
     }
   });
 
+  it("routes a Claude session to its own upstream through an existing daemon", async () => {
+    const root = await temporaryRoot();
+    const workspace = await temporaryRoot();
+    let openAiRequests = 0;
+    let anthropicPath: string | undefined;
+    let forwardedApiKey: string | undefined;
+    const openAiUpstream = await listen(
+      createServer((request, response) => {
+        openAiRequests += 1;
+        request.resume();
+        response.writeHead(500);
+        response.end();
+      }),
+    );
+    const anthropicUpstream = await listen(
+      createServer((request, response) => {
+        anthropicPath = request.url;
+        forwardedApiKey =
+          typeof request.headers["x-api-key"] === "string"
+            ? request.headers["x-api-key"]
+            : undefined;
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "msg_cli_claude",
+            type: "message",
+            role: "assistant",
+            model: "claude-sonnet-4-6",
+            content: [{ type: "text", text: "Captured through Claude." }],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 8, output_tokens: 4 },
+          }),
+        );
+      }),
+    );
+    const stdout = new CapturedOutput();
+    const stderr = new CapturedOutput();
+    const launch = async (configuration: ResolvedStartConfiguration) => {
+      const daemon = new BlackBoxDaemon({
+        homeDirectory: configuration.paths.homeDirectory,
+        proxy: configuration.proxy,
+        control: {
+          listenHost: configuration.controlHost,
+          listenPort: configuration.controlPort,
+        },
+        shutdownGraceMilliseconds: 100,
+      });
+      daemons.push(daemon);
+      await daemon.start();
+      return process.pid;
+    };
+    const cliRuntime = runtime(stdout, stderr, launch);
+
+    expect(
+      await runCli(
+        [
+          "start",
+          "--home",
+          root,
+          "--upstream",
+          openAiUpstream,
+          "--proxy-port",
+          "0",
+          "--control-port",
+          "0",
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+    stdout.clear();
+    const script = `
+      (async () => {
+        const response = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+            "x-api-key": "sk-ant-cli-never-persist"
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 64,
+            messages: [{ role: "user", content: "Hello" }]
+          })
+        });
+        process.stdout.write(JSON.stringify({
+          base: process.env.ANTHROPIC_BASE_URL,
+          session: process.env.BLACKBOX_SESSION_ID,
+          agent: process.env.BLACKBOX_AGENT,
+          status: response.status,
+          body: await response.json()
+        }));
+      })().catch((error) => {
+        process.stderr.write(String(error));
+        process.exitCode = 99;
+      });
+    `;
+
+    expect(
+      await runCli(
+        [
+          "run",
+          "--home",
+          root,
+          "--agent",
+          "claude",
+          "--upstream",
+          anthropicUpstream,
+          "--proxy-port",
+          "0",
+          "--control-port",
+          "0",
+          "--cwd",
+          workspace,
+          "--",
+          process.execPath,
+          "-e",
+          script,
+        ],
+        cliRuntime,
+      ),
+    ).toBe(0);
+
+    const childOutput = JSON.parse(stdout.value) as {
+      base: string;
+      session: string;
+      agent: string;
+      status: number;
+    };
+    expect(childOutput).toMatchObject({
+      agent: "claude",
+      status: 200,
+    });
+    expect(childOutput.base).toContain("/.blackbox/session/");
+    expect(childOutput.base).not.toMatch(/\/v1$/u);
+    expect(openAiRequests).toBe(0);
+    expect(anthropicPath).toBe("/v1/messages");
+    expect(forwardedApiKey).toBe("sk-ant-cli-never-persist");
+    expect(stderr.value).toBe("");
+
+    const paths = resolveDaemonPaths(root);
+    const storage = await openBlackBoxStorage({
+      databasePath: paths.databasePath,
+      dataDirectory: paths.dataDirectory,
+      recoverIncompleteExchanges: false,
+    });
+    try {
+      await eventually(() =>
+        storage.events
+          .list(childOutput.session)
+          .events.some((event) => event.type === "model.response.completed"),
+      );
+      expect(storage.sessions.getRequired(childOutput.session)).toMatchObject({
+        agentName: "claude",
+        upstreamOrigin: anthropicUpstream,
+      });
+      const rawRow = storage.unsafeDatabase
+        .prepare("SELECT id FROM raw_exchanges WHERE session_id = ?")
+        .get(childOutput.session) as { id: string };
+      const raw = storage.rawExchanges.getRequired(rawRow.id);
+      expect(raw.protocol).toBe("anthropic.messages");
+      expect(raw.requestHeaders["x-api-key"]).toBeUndefined();
+      expect(
+        storage.events
+          .list(childOutput.session)
+          .events.map((event) => event.type),
+      ).toEqual(
+        expect.arrayContaining([
+          "model.request",
+          "message.assistant",
+          "model.usage",
+          "model.response.completed",
+        ]),
+      );
+    } finally {
+      storage.close();
+    }
+  });
+
   it("forwards Ctrl-C and preserves the child's final filesystem effect", async () => {
     const root = await temporaryRoot();
     const workspace = await temporaryRoot();

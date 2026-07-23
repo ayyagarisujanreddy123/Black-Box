@@ -2,9 +2,9 @@
 
 The local capture, query, archive, and analysis service used by Black Box.
 
-The daemon owns the byte-faithful OpenAI-compatible proxy, authenticated local
-control/query API, SQLite evidence journal, browser assets, normalization,
-sessionization, reporting, and archive/retention services.
+The daemon owns the byte-faithful OpenAI-compatible and Anthropic Messages proxy,
+authenticated local control/query API, SQLite evidence journal, browser assets,
+normalization, sessionization, reporting, and archive/retention services.
 
 This package exists to support the Black Box runtime and is not the normal entry
 point. Install and invoke

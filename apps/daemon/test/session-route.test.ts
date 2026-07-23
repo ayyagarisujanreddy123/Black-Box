@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseSessionScopedPath,
   sessionScopedProxyBaseUrl,
+  sessionScopedProxyOrigin,
 } from "../src/index.js";
 
 describe("session-scoped proxy routes", () => {
@@ -17,6 +18,21 @@ describe("session-scoped proxy routes", () => {
     expect(parseSessionScopedPath(`${base.pathname}/responses`)).toEqual({
       sessionId: "session-wrapper-fixture",
       path: "/v1/responses",
+    });
+  });
+
+  it("provides the unversioned base expected by Anthropic clients", () => {
+    const origin = sessionScopedProxyOrigin(
+      "http://127.0.0.1:4141",
+      "session-wrapper-fixture",
+    );
+
+    expect(origin).not.toMatch(/\/v1$/u);
+    expect(
+      parseSessionScopedPath(`${new URL(origin).pathname}/v1/messages`),
+    ).toEqual({
+      sessionId: "session-wrapper-fixture",
+      path: "/v1/messages",
     });
   });
 

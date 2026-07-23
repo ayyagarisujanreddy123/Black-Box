@@ -175,15 +175,18 @@ describe("versioned evidence contracts", () => {
 });
 
 describe("privacy and inference constraints", () => {
-  it.each(["authorization", "Authorization", "cookie", "set-cookie"])(
-    "refuses to persist the %s header",
-    (headerName) => {
-      expect(
-        SafeHeadersSchema.safeParse({ [headerName]: ["fixture-secret"] })
-          .success,
-      ).toBe(false);
-    },
-  );
+  it.each([
+    "authorization",
+    "Authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "X-Api-Key",
+  ])("refuses to persist the %s header", (headerName) => {
+    expect(
+      SafeHeadersSchema.safeParse({ [headerName]: ["fixture-secret"] }).success,
+    ).toBe(false);
+  });
 
   it("requires a hard provenance edge for high-confidence blame", () => {
     const result = BlameResultSchema.safeParse({

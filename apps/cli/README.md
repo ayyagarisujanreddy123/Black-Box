@@ -7,7 +7,7 @@ Black Box is a local flight recorder for AI coding agents. It records observable
 ## Requirements
 
 - Node.js 22.15 or newer
-- An OpenAI-compatible agent or client that accepts a custom base URL
+- Codex, Claude Code, or another supported client that accepts a custom base URL
 
 ## Start recording
 
@@ -15,11 +15,19 @@ Black Box is a local flight recorder for AI coding agents. It records observable
 npm install --global @blackbox/cli
 blackbox init
 blackbox doctor
-blackbox run -- <agent-command>
+blackbox run -- codex
+blackbox run -- claude
 blackbox open
 ```
 
-You can also run Black Box as a standalone localhost proxy with `blackbox start` and point a compatible client at the printed `OPENAI_BASE_URL`.
+Direct Codex and Claude executables are auto-detected. Use `--agent` when another
+launcher hides the executable. Codex is routed through a one-run OpenAI
+configuration override, while Claude receives `ANTHROPIC_BASE_URL`; neither
+agent's global configuration is edited.
+
+You can also run Black Box as a standalone localhost proxy with `blackbox start`
+and point a compatible client at the printed `OPENAI_BASE_URL` or
+`ANTHROPIC_BASE_URL`.
 
 ## Investigate from the terminal
 

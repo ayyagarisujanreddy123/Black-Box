@@ -46,7 +46,7 @@ An airplane flight recorder does not control the pilot or prevent every accident
 
 When the agent is run through Black Box, the application can preserve observable evidence such as:
 
-- what the client sent to an OpenAI-compatible API;
+- what the client sent to a supported OpenAI-compatible or Anthropic API;
 - what the provider returned, including ordered streaming data;
 - which model messages, tool calls, tool results, errors, and usage values were visible;
 - what process was launched and what it printed;
@@ -58,7 +58,7 @@ The evidence stays on the developer's computer by default. Context reconstructio
 
 The shortest useful description is:
 
-> Run an OpenAI-compatible coding agent through Black Box, inspect its API-visible conversation and workspace effects on one synchronized timeline, and generate an evidence-linked explanation when something goes wrong.
+> Run Codex, Claude Code, or another supported coding agent through Black Box, inspect its API-visible conversation and workspace effects on one synchronized timeline, and generate an evidence-linked explanation when something goes wrong.
 
 ## 2. The problem Black Box solves
 
@@ -191,7 +191,8 @@ L2 is the recommended built-in experience. The codebase contains an adapter foun
 
 ### API evidence
 
-For supported OpenAI-compatible HTTP traffic, Black Box can preserve:
+For supported OpenAI-compatible and Anthropic Messages HTTP traffic, Black Box
+can preserve:
 
 - request method, route, safe headers, timing, and bounded body bytes;
 - response status, safe headers, timing, completion state, and bounded body bytes;
@@ -201,7 +202,8 @@ For supported OpenAI-compatible HTTP traffic, Black Box can preserve:
 - parser diagnostics and unsupported items without discarding the raw record;
 - whether the client, upstream, timeout, disconnect, or capture failure ended an exchange.
 
-Authorization and cookie header values are forwarded in memory when necessary but excluded from persisted header evidence.
+Authorization, `x-api-key`, and cookie header values are forwarded in memory
+when necessary but excluded from persisted header evidence.
 
 ### Process evidence
 
@@ -259,15 +261,20 @@ Internally, one run follows this lifecycle.
 
 The CLI resolves the Black Box home, listener addresses, upstream provider origin, capture bounds, and timeouts. It creates private directories and a random local control token if needed.
 
-The upstream defaults to `https://api.openai.com`, but `--upstream` or `BLACKBOX_UPSTREAM_URL` can select another credential-free HTTP(S) origin.
+The upstream defaults to `https://api.openai.com` for Codex and other
+OpenAI-compatible clients, or `https://api.anthropic.com` when a direct Claude
+command is selected. `--upstream` or `BLACKBOX_UPSTREAM_URL` can select another
+credential-free HTTP(S) origin.
 
-Black Box deliberately does not use an existing `OPENAI_BASE_URL` as its upstream. That variable is reserved for pointing the child back to the recorder proxy. Reusing it would risk a proxy loop.
+Black Box deliberately does not use an existing `OPENAI_BASE_URL` or
+`ANTHROPIC_BASE_URL` as its upstream. Those variables are reserved for pointing
+children back to the recorder proxy. Reusing either would risk a proxy loop.
 
 ### Step 2: Start or reuse the daemon
 
 The CLI starts a detached local daemon if a healthy one is not already available. The daemon owns:
 
-- the OpenAI-compatible proxy listener;
+- the OpenAI-compatible and Anthropic Messages proxy listener;
 - the authenticated control/query API;
 - the browser cockpit assets;
 - the SQLite connection and blob store;
@@ -282,12 +289,19 @@ The wrapper creates a new session identifier and capture snapshot. Explicit sess
 
 The child receives environment values including:
 
-- a session-scoped `OPENAI_BASE_URL` ending in `/v1`;
+- a provider-specific session base URL (`OPENAI_BASE_URL` ending in `/v1` or
+  `ANTHROPIC_BASE_URL` without that suffix);
 - `BLACKBOX_PROXY_ORIGIN`;
 - `BLACKBOX_SESSION_ID`;
 - `BLACKBOX_CAPTURE_LEVEL=wrapped-process`.
 
-The child must honor the injected OpenAI base URL for API traffic to be captured. Process and workspace evidence still works if the child ignores it, but provider traffic will be absent.
+Direct Codex and Claude executables are auto-detected. Codex also receives a
+one-run `openai_base_url` CLI override, while Claude receives
+`ANTHROPIC_BASE_URL`; global agent configuration is not edited. The child must
+honor the selected base URL for API traffic to be captured. Process and workspace
+evidence still works if the child ignores it, but provider traffic will be absent.
+Each wrapped session pins its validated upstream so one daemon can route OpenAI
+and Anthropic sessions independently.
 
 ### Step 4: Capture the workspace baseline
 
@@ -477,15 +491,17 @@ Selected event text is indexed through SQLite FTS5. Search results remain linked
 
 ### Supported surfaces
 
-| Surface                              | Forwarded     | Normalized               |
-| ------------------------------------ | ------------- | ------------------------ |
-| `/v1/responses` JSON                 | Yes           | Yes                      |
-| `/v1/responses` SSE                  | Yes           | Yes                      |
-| `/v1/chat/completions` JSON          | Yes           | Yes                      |
-| `/v1/chat/completions` SSE           | Yes           | Yes                      |
-| Other compatible HTTP `/v1/*` routes | When possible | Preserved as raw/unknown |
-| Responses WebSocket/Realtime         | No            | No                       |
-| Provider-specific non-OpenAI schemas | Not claimed   | No                       |
+| Surface                               | Forwarded     | Normalized               |
+| ------------------------------------- | ------------- | ------------------------ |
+| `/v1/responses` JSON                  | Yes           | Yes                      |
+| `/v1/responses` SSE                   | Yes           | Yes                      |
+| `/v1/chat/completions` JSON           | Yes           | Yes                      |
+| `/v1/chat/completions` SSE            | Yes           | Yes                      |
+| `/v1/messages` JSON                   | Yes           | Yes                      |
+| `/v1/messages` SSE                    | Yes           | Yes                      |
+| Other compatible HTTP `/v1/*` routes  | When possible | Preserved as raw/unknown |
+| Responses WebSocket/Realtime          | No            | No                       |
+| Bedrock, Vertex, other native schemas | Not claimed   | No                       |
 
 ### Byte fidelity
 
@@ -501,7 +517,10 @@ Golden tests compare direct upstream bytes with bytes received through Black Box
 
 Black Box removes hop-by-hop headers that must be regenerated by the HTTP stack. It preserves useful response metadata such as provider request identifiers and content type.
 
-Sensitive headers—including authorization, proxy authorization, cookies, and set-cookie values—are excluded from persisted header evidence. This does not guarantee that a credential cannot appear inside a body, source file, tool result, or terminal frame.
+Sensitive headers—including authorization, `x-api-key`, proxy authorization,
+cookies, and set-cookie values—are excluded from persisted header evidence. This
+does not guarantee that a credential cannot appear inside a body, source file,
+tool result, or terminal frame.
 
 ### Bounds and failure behavior
 
@@ -813,7 +832,8 @@ Version 0.1.0 is an unreleased source candidate. The packages remain marked priv
 
 - Node.js 22.15 or newer;
 - npm 10 or newer;
-- an OpenAI-compatible agent/client that can honor a custom base URL for API capture;
+- Codex, Claude Code, or another supported agent/client that can honor a custom
+  base URL for API capture;
 - permission to inspect the target workspace and traffic.
 
 ### Build from source
@@ -834,10 +854,12 @@ npm run blackbox -- doctor
 blackbox run -- <agent-command> [arguments...]
 ```
 
-Example:
+Examples:
 
 ```bash
-blackbox run -- node ./path/to/agent.js
+blackbox run -- codex
+blackbox run -- claude
+blackbox run --agent openai-compatible -- node ./path/to/agent.js
 ```
 
 Use `--cwd PATH` when the agent should run in another workspace.
@@ -846,11 +868,13 @@ Use `--cwd PATH` when the agent should run in another workspace.
 
 ```bash
 blackbox init
-blackbox start --upstream https://api.openai.com
+blackbox start --upstream https://api.anthropic.com
 blackbox status
 ```
 
-Configure the client with the printed proxy base URL. This gives L1 API capture. Use the wrapper when process and filesystem evidence are important.
+Configure the client with the printed `OPENAI_BASE_URL` or
+`ANTHROPIC_BASE_URL`, as appropriate. This gives L1 API capture. Use the wrapper
+when process and filesystem evidence are important.
 
 ### Inspect the result
 
@@ -1332,7 +1356,7 @@ The ten ADRs explain why the implementation chose:
 
 | Symptom                                                | What to check                                                                                              |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| No API events                                          | Confirm the child honors the injected `OPENAI_BASE_URL`; run `doctor`                                      |
+| No API events                                          | Confirm the child honors its OpenAI/Anthropic base URL; use `--agent` when auto-detection cannot see it    |
 | Process/file evidence exists but API evidence does not | The child probably ignored or replaced the injected base URL                                               |
 | Port or daemon conflict                                | Run `status`, then `stop`; use `doctor` to inspect occupied listeners/stale state                          |
 | Cockpit does not open                                  | Run `open` again and use the authenticated local URL produced by the CLI                                   |
@@ -1360,9 +1384,10 @@ The ten ADRs explain why the implementation chose:
 
 ### Current limitations
 
-- Only OpenAI-compatible HTTP JSON/SSE behavior is normalized.
+- OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages HTTP
+  JSON/SSE behavior is normalized.
 - Responses WebSocket and Realtime are explicitly unsupported.
-- Non-OpenAI provider-specific semantics are not claimed.
+- Bedrock, Vertex, and other provider-native semantics are not claimed.
 - No completed agent-specific adapter is bundled.
 - Provider-hidden context and private model reasoning are unavailable.
 - Filesystem watcher time is approximate.

@@ -83,6 +83,7 @@ const SETTINGS = [
   "max_output_tokens",
   "seed",
   "stop",
+  "stop_sequences",
   "tool_choice",
   "parallel_tool_calls",
   "response_format",
@@ -93,6 +94,8 @@ const SETTINGS = [
   "service_tier",
   "prompt",
   "context_management",
+  "metadata",
+  "thinking",
 ] as const;
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -285,6 +288,110 @@ function addMessage(
   }
 }
 
+function addAnthropicMessage(
+  value: JsonRecord,
+  builder: ContextItemBuilder,
+  provenance: ProvenanceReference,
+): void {
+  const messageRole = role(value.role);
+  const content = value.content;
+  if (typeof content === "string") {
+    builder.add(
+      "message",
+      { content, text: content },
+      provenance,
+      messageRole === undefined ? {} : { role: messageRole },
+    );
+    return;
+  }
+  if (!Array.isArray(content)) {
+    builder.add(
+      "unknown",
+      { message: value },
+      provenance,
+      messageRole === undefined ? {} : { role: messageRole },
+    );
+    return;
+  }
+
+  const text = content
+    .filter(isRecord)
+    .filter((block) => block.type === "text")
+    .map((block) => (typeof block.text === "string" ? block.text : ""))
+    .join("");
+  const hasGeneralContent = content.some(
+    (block) =>
+      !isRecord(block) ||
+      !new Set([
+        "tool_use",
+        "tool_result",
+        "thinking",
+        "redacted_thinking",
+      ]).has(typeof block.type === "string" ? block.type : ""),
+  );
+  if (text.length > 0 || hasGeneralContent) {
+    builder.add(
+      "message",
+      {
+        content,
+        ...(text.length === 0 ? {} : { text }),
+      },
+      provenance,
+      messageRole === undefined ? {} : { role: messageRole },
+    );
+  }
+
+  for (const block of content) {
+    if (!isRecord(block)) {
+      continue;
+    }
+    const type = typeof block.type === "string" ? block.type : undefined;
+    if (type === "tool_use" || type?.endsWith("_tool_use") === true) {
+      builder.add(
+        "tool-call",
+        {
+          ...(typeof block.id === "string" ? { callId: block.id } : {}),
+          ...(typeof block.name === "string" ? { name: block.name } : {}),
+          arguments: block.input ?? {},
+          ...(type === "tool_use" ? {} : { providerType: type }),
+        },
+        provenance,
+        { role: "assistant" },
+      );
+    } else if (
+      type === "tool_result" ||
+      type?.endsWith("_tool_result") === true
+    ) {
+      builder.add(
+        "tool-result",
+        {
+          ...(typeof block.tool_use_id === "string"
+            ? { callId: block.tool_use_id }
+            : {}),
+          output: block.content ?? block,
+          ...(typeof block.is_error === "boolean"
+            ? { isError: block.is_error }
+            : {}),
+          ...(type === "tool_result" ? {} : { providerType: type }),
+        },
+        provenance,
+        { role: "tool" },
+      );
+    } else if (type === "thinking" || type === "redacted_thinking") {
+      builder.add(
+        "reasoning-opaque",
+        {
+          itemType: type,
+          opaque: true,
+          hasSignature: typeof block.signature === "string",
+        },
+        provenance,
+        { role: "assistant", evidence: "unknown" },
+      );
+    }
+  }
+}
+
 function addResponsesItem(
   value: unknown,
   builder: ContextItemBuilder,
@@ -408,6 +515,33 @@ function addRequestItems(
     return;
   }
   const provenance = requestProvenance(turn);
+  if (turn.exchange.protocol === "anthropic.messages") {
+    if (includeTopLevel && request.system !== undefined) {
+      builder.add(
+        "instructions",
+        {
+          value: request.system,
+          ...(textFromContent(request.system) === undefined
+            ? {}
+            : { text: textFromContent(request.system) }),
+        },
+        provenance,
+      );
+    }
+    const messages = Array.isArray(request.messages) ? request.messages : [];
+    for (const message of messages) {
+      if (isRecord(message)) {
+        addAnthropicMessage(message, builder, provenance);
+      } else {
+        builder.add("unknown", { message: message ?? null }, provenance);
+      }
+    }
+    if (includeTopLevel) {
+      addTools(request.tools, builder, provenance);
+      addSettings(request, builder, provenance);
+    }
+    return;
+  }
   if (turn.exchange.protocol === "openai.chat-completions") {
     const messages = Array.isArray(request.messages) ? request.messages : [];
     for (const message of messages) {
@@ -460,7 +594,9 @@ function addResponseItems(turn: LoadedTurn, builder: ContextItemBuilder): void {
       });
     } else if (
       event.type === "provider.item.unknown" &&
-      event.summary.itemType === "reasoning"
+      new Set(["reasoning", "thinking", "redacted_thinking"]).has(
+        String(event.summary.itemType),
+      )
     ) {
       const payload = isRecord(event.summary.payload)
         ? event.summary.payload
@@ -561,6 +697,8 @@ export class ContextReconstructor {
     if (current.request !== undefined) {
       if (current.exchange.protocol === "openai.responses") {
         await this.resolveResponsesAncestry(current, state);
+      } else if (current.exchange.protocol === "anthropic.messages") {
+        this.markProviderManagedRequestState(current.request, state);
       } else if (current.exchange.protocol !== "openai.chat-completions") {
         state.limitations.add(
           `Protocol ${current.exchange.protocol} has no context parser.`,
@@ -578,7 +716,7 @@ export class ContextReconstructor {
     }
     if (builder.sawOpaqueReasoning) {
       state.limitations.add(
-        "Reasoning state is opaque; raw reasoning text is not API-visible.",
+        "Reasoning state is opaque in reconstructed context and is not used for causal claims.",
       );
     }
 

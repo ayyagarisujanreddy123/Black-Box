@@ -1,6 +1,6 @@
 # Adapter authoring for Black Box 0.1
 
-Black Box 0.1 includes a small, protocol-level adapter foundation for clients that can configure an OpenAI-compatible base URL and attach stable session identity. It does not yet expose a public custom-event ingestion API, and the repository does not bundle an agent-specific adapter.
+Black Box 0.1 includes a small, protocol-level adapter foundation for clients that can configure an OpenAI-compatible or Anthropic Messages base URL and attach stable session identity. It does not yet expose a public custom-event ingestion API, and the repository does not bundle an L3 agent-event adapter.
 
 This distinction matters: an adapter can make API exchanges belong to the correct investigation and label that observation boundary accurately, but it must not claim that Black Box observed an agent-internal tool event unless that event also crossed a supported API, process, or filesystem boundary.
 
@@ -8,7 +8,8 @@ This distinction matters: an adapter can make API exchanges belong to the correc
 
 Use an adapter when an agent or framework:
 
-- supports OpenAI Responses or Chat Completions over HTTP JSON or SSE;
+- supports OpenAI Responses, OpenAI Chat Completions, or Anthropic Messages
+  over HTTP JSON or SSE;
 - allows its provider base URL to point at the Black Box proxy;
 - has its own stable run, thread, or conversation identifier;
 - cannot be launched through `blackbox run`, or benefits from more reliable session grouping than the idle-window heuristic.
@@ -70,7 +71,9 @@ const response = await fetch(`${proxyOrigin}/v1/responses`, {
 });
 ```
 
-Authorization and cookie headers are forwarded in memory so the provider request still works, but Black Box's protocol schema and persistence boundary reject them from stored header evidence.
+Authorization, `x-api-key`, and cookie headers are forwarded in memory so the
+provider request still works, but Black Box's protocol schema and persistence
+boundary reject them from stored header evidence.
 
 ## Session-scoped base URL
 
@@ -89,6 +92,13 @@ const baseURL = `http://127.0.0.1:4141/.blackbox/session/${encoded}/v1`;
 ```
 
 Black Box decodes the route locally, validates the session ID, removes the private prefix, and forwards the request to the ordinary upstream `/v1/...` path. A request that supplies both this route and a conflicting `X-Blackbox-Session` header is rejected.
+
+Anthropic clients expect a base URL before `/v1`, so use the same route without
+the final `/v1`:
+
+```text
+http://127.0.0.1:4141/.blackbox/session/<base64url-utf8-session-id>
+```
 
 ## Capture-level and evidence rules
 
@@ -110,7 +120,8 @@ An adapter should:
 1. run `blackbox doctor` during setup and report unsupported transports clearly;
 2. start or reuse the daemon through the CLI rather than spawning internal package files;
 3. read the proxy origin from normal CLI/status output, never the private control token;
-4. configure only the agent's provider base URL—do not replace Black Box's upstream with `OPENAI_BASE_URL`;
+4. configure only the agent's provider base URL—do not replace Black Box's
+   upstream with `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`;
 5. attach the same session signal to every request in one agent run;
 6. let provider errors, cancellation, and streaming pass through unchanged;
 7. stop attaching the signal when that agent run ends;
@@ -125,6 +136,7 @@ Before describing an integration as supported, test all applicable items:
 - non-streaming Responses request and response;
 - streaming Responses SSE without changed bytes or event order;
 - Chat Completions JSON and SSE if the agent uses them;
+- Anthropic Messages JSON and SSE if the agent uses them;
 - provider 4xx/5xx responses;
 - client cancellation and upstream disconnect behavior;
 - repeated requests with one stable adapter session key;

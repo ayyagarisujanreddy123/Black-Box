@@ -13,6 +13,7 @@ const FORBIDDEN_PERSISTED_HEADERS = new Set([
   "proxy-authorization",
   "proxy-authenticate",
   "set-cookie",
+  "x-api-key",
 ]);
 
 function recordEntries(value: unknown): unknown {
@@ -55,6 +56,7 @@ export const SafeHeadersSchema = stringArrayRecord(
 export const RawExchangeProtocolSchema = z.enum([
   "openai.responses",
   "openai.chat-completions",
+  "anthropic.messages",
   "unknown-openai-compatible",
 ]);
 

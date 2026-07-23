@@ -15,7 +15,7 @@
 
 Black Box records what an AI coding agent saw, said, called, printed, and changed—then turns that evidence into an investigation you can inspect locally.
 
-It runs as a CLI-managed localhost recorder with a browser cockpit. Put an OpenAI-compatible coding agent behind the byte-faithful proxy, or launch it through `blackbox run`, and Black Box builds a synchronized record of API traffic, model/tool events, process output, and workspace effects.
+It runs as a CLI-managed localhost recorder with a browser cockpit. Launch Codex, Claude Code, or another supported HTTP client through `blackbox run`, and Black Box builds a synchronized record of API traffic, model/tool events, process output, and workspace effects.
 
 When an agent deletes a test, follows instructions hidden in a README, repeats a failing command, or drifts outside the user's request, Black Box helps answer:
 
@@ -72,7 +72,7 @@ Requirements:
 
 - Node.js 22.15 or newer
 - npm 10 or newer
-- An OpenAI-compatible agent or client that accepts a custom base URL
+- Codex, Claude Code, or another supported client that accepts a custom base URL
 
 From this repository:
 
@@ -92,8 +92,13 @@ npm run blackbox -- run -- <agent-command> [arguments...]
 For example:
 
 ```bash
-npm run blackbox -- run -- node ./path/to/agent.js
+npm run blackbox -- run -- codex
+npm run blackbox -- run -- claude
 ```
+
+Direct `codex` and `claude` executables are detected automatically. Use
+`--agent codex`, `--agent claude`, or `--agent openai-compatible` when the
+agent is launched through another executable such as a package runner or shell.
 
 Open the local evidence cockpit:
 
@@ -109,15 +114,15 @@ npm run blackbox -- inspect <session-id> --json
 npm run blackbox -- report <session-id>
 ```
 
-`blackbox run` starts or reuses the daemon, creates one explicit session, injects a session-scoped `OPENAI_BASE_URL`, mirrors the child process, observes its workspace, and preserves the child's exit status.
+`blackbox run` starts or reuses the daemon, creates one explicit session, selects a provider integration, mirrors the child process, observes its workspace, and preserves the child's exit status. Codex receives a one-run `openai_base_url` override plus `OPENAI_BASE_URL`; Claude receives a session-scoped `ANTHROPIC_BASE_URL`. Black Box does not edit either agent's global configuration.
 
-The child must honor the injected base URL for Black Box to capture its provider traffic. Process and workspace evidence still work through the wrapper; `blackbox doctor` reports known transport and configuration limitations before a real run.
+The child must honor the selected base URL for Black Box to capture its provider traffic. Process and workspace evidence still works through the wrapper; `blackbox doctor` reports known transport and configuration limitations before a real run. Each wrapped session pins its own validated upstream, so Codex and Claude sessions can safely reuse one daemon.
 
 All examples below use the installed `blackbox` command for readability. When running from source, replace `blackbox` with `npm run blackbox --`.
 
 ## Run as a standalone proxy
 
-If a client already supports a custom OpenAI base URL, start Black Box separately:
+If a client already supports a custom provider base URL, start Black Box separately:
 
 ```bash
 blackbox init
@@ -125,20 +130,20 @@ blackbox start --upstream https://api.openai.com
 blackbox status
 ```
 
-Point the client at the `OPENAI_BASE_URL` printed by `blackbox start`, then inspect its sessions:
+Point an OpenAI-compatible client at the printed `OPENAI_BASE_URL`, or an Anthropic Messages client at the printed `ANTHROPIC_BASE_URL`, then inspect its sessions:
 
 ```bash
 blackbox sessions
 blackbox open <session-id>
 ```
 
-Configure the provider origin with `--upstream` or `BLACKBOX_UPSTREAM_URL`. Black Box deliberately does not use `OPENAI_BASE_URL` as its upstream because that variable points the client back to the recorder.
+Configure the credential-free provider origin with `--upstream` or `BLACKBOX_UPSTREAM_URL`. Black Box deliberately does not use `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` as its upstream because those variables point clients back to the recorder.
 
 ## What Black Box records
 
 ### API evidence
 
-- OpenAI Responses and Chat Completions HTTP requests
+- OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages HTTP requests
 - Non-streaming JSON and ordered SSE response traffic
 - Status, safe headers, timing, completion, timeout, cancellation, and disconnect evidence
 - Raw request/response payload references and chunk manifests
@@ -397,14 +402,14 @@ If a live provider is unavailable during a real investigation, process and works
 
 ## Troubleshooting
 
-| Symptom                              | Check                                                                                                |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| No API events                        | Confirm the child honors the injected `OPENAI_BASE_URL`; run `blackbox doctor` before retrying.      |
-| Daemon or port conflict              | Run `blackbox status`, then `blackbox stop`; `doctor` identifies occupied listeners and stale state. |
-| Cockpit does not open automatically  | Run `blackbox open` again and use the authenticated loopback URL printed by the CLI.                 |
-| Export says the session is unsettled | Finish or stop the capture first; active and incomplete writes cannot be packaged safely.            |
-| Import reports an integrity failure  | Treat the file as corrupt or modified. Obtain a new copy instead of bypassing verification.          |
-| Storage quota is reached             | Preview `blackbox prune` with an age or byte target, inspect the plan, then rerun with `--yes`.      |
+| Symptom                              | Check                                                                                                                                          |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| No API events                        | Confirm the child honors its injected OpenAI or Anthropic base URL; use `--agent` explicitly if auto-detection cannot see the real executable. |
+| Daemon or port conflict              | Run `blackbox status`, then `blackbox stop`; `doctor` identifies occupied listeners and stale state.                                           |
+| Cockpit does not open automatically  | Run `blackbox open` again and use the authenticated loopback URL printed by the CLI.                                                           |
+| Export says the session is unsettled | Finish or stop the capture first; active and incomplete writes cannot be packaged safely.                                                      |
+| Import reports an integrity failure  | Treat the file as corrupt or modified. Obtain a new copy instead of bypassing verification.                                                    |
+| Storage quota is reached             | Preview `blackbox prune` with an age or byte target, inspect the plan, then rerun with `--yes`.                                                |
 
 ## Measured local smoke test
 
@@ -416,6 +421,9 @@ On 2026-07-21, the reproducible 100-sample loopback benchmark measured 6.031 ms 
 | ------------------------------------------- | ---------------------------------- |
 | OpenAI Responses over HTTP JSON/SSE         | Supported                          |
 | OpenAI Chat Completions over HTTP JSON/SSE  | Supported                          |
+| Anthropic Messages over HTTP JSON/SSE       | Supported                          |
+| Direct Codex CLI launch integration         | Supported                          |
+| Direct Claude Code launch integration       | Supported                          |
 | Byte-faithful response forwarding           | Supported and fixture-tested       |
 | Wrapped process and workspace observation   | Supported                          |
 | Live authenticated browser cockpit          | Supported                          |
@@ -427,29 +435,29 @@ On 2026-07-21, the reproducible 100-sample loopback benchmark measured 6.031 ms 
 | Read-only imported investigations           | Supported and database-enforced    |
 | Dry-run deletion and retention pruning      | Supported                          |
 | Responses WebSocket / Realtime              | Not supported; rejected explicitly |
-| Non-OpenAI provider protocols               | Not yet supported                  |
+| Bedrock, Vertex, and other provider schemas | Not yet supported                  |
 | Provider-hidden context or chain-of-thought | Not observable and never claimed   |
 | Active replay of recorded actions           | Not supported                      |
 | Cloud sync or multi-user server             | Not supported                      |
 
 ## CLI reference
 
-| Command                                                | Purpose                                                          |
-| ------------------------------------------------------ | ---------------------------------------------------------------- |
-| `blackbox init [--home PATH]`                          | Create the private local data area                               |
-| `blackbox doctor [--upstream URL] [--json]`            | Check runtime, database, storage, upstream, and transport health |
-| `blackbox start [--upstream URL]`                      | Start the detached proxy and control server                      |
-| `blackbox run [--cwd PATH] -- <command...>`            | Run one agent/process with API, process, and workspace evidence  |
-| `blackbox status [--json]`                             | Show daemon and recorder health                                  |
-| `blackbox open [session-id]`                           | Start/reuse the daemon and open the authenticated cockpit        |
-| `blackbox sessions [--limit N] [--json]`               | List recorded sessions                                           |
-| `blackbox inspect <session-id> [--type TYPE] [--json]` | Read canonical events from the terminal                          |
-| `blackbox report <session-id> [--ai] [--json]`         | Generate an offline report or explicitly opt into AI enrichment  |
-| `blackbox export <session-id> --output FILE`           | Create a redacted or explicit forensic `.bbx` archive            |
-| `blackbox import <archive.bbx> [--json]`               | Verify and install a read-only investigation                     |
-| `blackbox delete <session-id> [--yes]`                 | Preview or apply deletion of one investigation                   |
-| `blackbox prune [--older-than-days N] [--max-bytes N]` | Preview or apply an age/size retention plan                      |
-| `blackbox stop [--timeout-ms MS]`                      | Stop the daemon with bounded cleanup                             |
+| Command                                                    | Purpose                                                          |
+| ---------------------------------------------------------- | ---------------------------------------------------------------- |
+| `blackbox init [--home PATH]`                              | Create the private local data area                               |
+| `blackbox doctor [--upstream URL] [--json]`                | Check runtime, database, storage, upstream, and transport health |
+| `blackbox start [--upstream URL]`                          | Start the detached proxy and control server                      |
+| `blackbox run [--agent NAME] [--cwd PATH] -- <command...>` | Run one agent/process with API, process, and workspace evidence  |
+| `blackbox status [--json]`                                 | Show daemon and recorder health                                  |
+| `blackbox open [session-id]`                               | Start/reuse the daemon and open the authenticated cockpit        |
+| `blackbox sessions [--limit N] [--json]`                   | List recorded sessions                                           |
+| `blackbox inspect <session-id> [--type TYPE] [--json]`     | Read canonical events from the terminal                          |
+| `blackbox report <session-id> [--ai] [--json]`             | Generate an offline report or explicitly opt into AI enrichment  |
+| `blackbox export <session-id> --output FILE`               | Create a redacted or explicit forensic `.bbx` archive            |
+| `blackbox import <archive.bbx> [--json]`                   | Verify and install a read-only investigation                     |
+| `blackbox delete <session-id> [--yes]`                     | Preview or apply deletion of one investigation                   |
+| `blackbox prune [--older-than-days N] [--max-bytes N]`     | Preview or apply an age/size retention plan                      |
+| `blackbox stop [--timeout-ms MS]`                          | Stop the daemon with bounded cleanup                             |
 
 See the complete option list with:
 

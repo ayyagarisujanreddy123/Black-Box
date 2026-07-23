@@ -82,12 +82,23 @@ Never place credentials in the upstream URL.
 For normal use, prefer the wrapper because it adds process and workspace evidence:
 
 ```bash
-blackbox run --cwd /path/to/workspace -- <agent-command> [arguments...]
+blackbox run --cwd /path/to/workspace -- codex
+blackbox run --cwd /path/to/workspace -- claude
 ```
 
-The child must honor the injected `OPENAI_BASE_URL` for provider-traffic capture.
-If it ignores that variable, process and workspace evidence can still exist while
-API evidence is absent.
+Direct Codex and Claude executables are detected automatically. Use
+`--agent codex`, `--agent claude`, or `--agent openai-compatible` when another
+launcher hides the executable. Codex receives a one-run OpenAI base-URL override;
+Claude receives `ANTHROPIC_BASE_URL`. Each session pins its validated upstream,
+so one daemon can safely serve concurrent or sequential OpenAI and Anthropic
+sessions. The default Claude upstream is `https://api.anthropic.com`; an explicit
+`--upstream` always wins.
+
+The child must honor its selected base URL for provider-traffic capture. If it
+ignores that setting, process and workspace evidence can still exist while API
+evidence is absent. Native Bedrock and Vertex transports, OpenAI WebSocket/
+Realtime, and gateways that require a path-bearing upstream URL are outside the
+supported production boundary.
 
 ## Health and readiness
 
@@ -198,6 +209,12 @@ two evidence homes or open an upgraded database with an older application.
 Application rollback is unsafe after a schema migration. Restore the stopped
 whole-home snapshot with the matching older version instead. Preserve the failed
 upgrade copy for investigation.
+
+The provider-support migration removes historically retained `x-api-key` fields
+from active raw-exchange header records. Its private pre-migration database backup
+can still contain the earlier bytes. Protect or retire that backup according to
+your credential-retention policy, and rotate an Anthropic key if it was previously
+routed through an older Black Box build.
 
 ## Operational logs
 

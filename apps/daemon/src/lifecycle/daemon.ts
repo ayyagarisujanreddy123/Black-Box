@@ -112,6 +112,7 @@ export class BlackBoxDaemon {
       startedAt: this.startedAtValue,
       proxyOrigin: proxyAddress.origin,
       controlOrigin: controlAddress.origin,
+      upstreamOrigin: proxy.configuration.upstream.origin,
       proxy: proxy.health(),
       storage: {
         schemaVersion: storage.schemaVersion,

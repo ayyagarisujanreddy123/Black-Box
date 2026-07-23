@@ -75,7 +75,7 @@ function effectivePort(url: URL): number {
   return url.protocol === "https:" ? 443 : 80;
 }
 
-function validateUpstream(input: string | URL): URL {
+export function validateUpstreamOrigin(input: string | URL): URL {
   let upstream: URL;
   try {
     upstream = input instanceof URL ? new URL(input) : new URL(input);
@@ -132,7 +132,9 @@ export function resolveProxyConfiguration(
   const listenHost = HostSchema.parse(input.listenHost ?? DEFAULT_PROXY_HOST);
   const listenPort = PortSchema.parse(input.listenPort ?? DEFAULT_PROXY_PORT);
   const allowNonLoopback = input.allowNonLoopback === true;
-  const upstream = validateUpstream(input.upstream ?? DEFAULT_UPSTREAM_ORIGIN);
+  const upstream = validateUpstreamOrigin(
+    input.upstream ?? DEFAULT_UPSTREAM_ORIGIN,
+  );
 
   if (!isLoopbackHost(listenHost) && !allowNonLoopback) {
     throw new UnsafeBindError(listenHost);

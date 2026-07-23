@@ -91,6 +91,7 @@ describe("proxy configuration safety", () => {
 describe("header forwarding and persistence boundaries", () => {
   const incoming = {
     authorization: "Bearer fixture-secret",
+    "x-api-key": "anthropic-fixture-secret",
     cookie: "session=fixture-cookie",
     host: "127.0.0.1:4141",
     connection: "keep-alive, x-private-hop",
@@ -104,6 +105,7 @@ describe("header forwarding and persistence boundaries", () => {
     const forwarded = headersForForwarding(incoming, { dropHost: true });
 
     expect(forwarded.authorization).toBe("Bearer fixture-secret");
+    expect(forwarded["x-api-key"]).toBe("anthropic-fixture-secret");
     expect(forwarded.cookie).toBe("session=fixture-cookie");
     expect(forwarded.host).toBeUndefined();
     expect(forwarded.connection).toBeUndefined();
@@ -117,8 +119,10 @@ describe("header forwarding and persistence boundaries", () => {
     const serialized = JSON.stringify(persisted);
 
     expect(serialized).not.toContain("fixture-secret");
+    expect(serialized).not.toContain("anthropic-fixture-secret");
     expect(serialized).not.toContain("fixture-cookie");
     expect(persisted.authorization).toBeUndefined();
+    expect(persisted["x-api-key"]).toBeUndefined();
     expect(persisted.cookie).toBeUndefined();
     expect(persisted["content-type"]).toEqual(["application/json"]);
   });

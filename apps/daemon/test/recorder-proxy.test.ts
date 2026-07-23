@@ -273,6 +273,7 @@ describe("byte-faithful recorder proxy", () => {
     const proxy = await makeProxy(upstream.origin, storage);
     const body = Buffer.from('{"model":"fixture","input":"hello"}');
     const secret = "Bearer sk-fixture-never-persist";
+    const anthropicSecret = "sk-ant-fixture-never-persist";
     const cookie = "session=fixture-never-persist";
     const result = await requestBytes(
       proxy.address()?.origin as string,
@@ -280,6 +281,7 @@ describe("byte-faithful recorder proxy", () => {
       body,
       {
         authorization: secret,
+        "x-api-key": anthropicSecret,
         cookie,
         "x-blackbox-session": "session-explicit",
         "content-type": "application/json",
@@ -297,6 +299,9 @@ describe("byte-faithful recorder proxy", () => {
       "two=2; Secure",
     ]);
     expect(upstream.observations[0]?.headers.authorization).toBe(secret);
+    expect(upstream.observations[0]?.headers["x-api-key"]).toBe(
+      anthropicSecret,
+    );
     expect(upstream.observations[0]?.headers.cookie).toBe(cookie);
     expect(
       upstream.observations[0]?.headers["x-blackbox-session"],
@@ -314,6 +319,7 @@ describe("byte-faithful recorder proxy", () => {
       Date.parse(raw.firstByteAt as string),
     );
     expect(raw.requestHeaders.authorization).toBeUndefined();
+    expect(raw.requestHeaders["x-api-key"]).toBeUndefined();
     expect(raw.requestHeaders.cookie).toBeUndefined();
     expect(raw.responseHeaders?.["set-cookie"]).toBeUndefined();
     expect(await storage.blobs.get(raw.requestBodyRef?.id as string)).toEqual(
@@ -325,6 +331,7 @@ describe("byte-faithful recorder proxy", () => {
     storage.checkpoint("TRUNCATE");
     const databaseBytes = await readFile(storage.databasePath);
     expect(databaseBytes.includes(Buffer.from(secret))).toBe(false);
+    expect(databaseBytes.includes(Buffer.from(anthropicSecret))).toBe(false);
     expect(databaseBytes.includes(Buffer.from(cookie))).toBe(false);
     const blobIds = storage.unsafeDatabase
       .prepare("SELECT id FROM blobs ORDER BY id")

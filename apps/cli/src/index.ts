@@ -22,7 +22,7 @@ import {
   readControlToken,
   readDaemonLockRecord,
   openAiReportProviderFromEnvironment,
-  sessionScopedProxyBaseUrl,
+  sessionScopedProxyOrigin,
   writeBbxArchiveFile,
   type DaemonLockRecord,
   type DaemonPaths,
@@ -35,6 +35,11 @@ import {
 } from "@blackbox/protocol";
 import { openBlackBoxStorage } from "@blackbox/storage";
 
+import {
+  defaultUpstreamForAgent,
+  prepareAgentLaunch,
+  resolveAgentIntegration,
+} from "./agent-integration.js";
 import {
   createViewerUrl,
   openSystemBrowser,
@@ -84,7 +89,7 @@ Usage:
   blackbox import <archive.bbx> [--json]
   blackbox delete <session-id> [--yes] [--json]
   blackbox prune [--older-than-days N] [--max-bytes N] [--yes] [--json]
-  blackbox run [--cwd PATH] -- <command...>
+  blackbox run [--agent auto|codex|claude|openai-compatible] [--cwd PATH] -- <command...>
 
 Common options:
   --home PATH                     Override the private Black Box data directory
@@ -125,6 +130,7 @@ Archive and retention options:
   --yes                           Apply a displayed delete/prune plan
 
 Run options:
+  --agent NAME                    Agent integration (default auto-detect)
   --cwd PATH                      Child working directory (default current directory)
   --max-output-frame-bytes N      Maximum stored stdout/stderr frame (default 262144)
   --max-untracked-file-bytes N    Maximum stored content per changed file (default 1048576)
@@ -194,6 +200,7 @@ function writeStatus(
   output.write(`${prefix}: ${status.state} (PID ${status.pid})\n`);
   output.write(`Proxy: ${status.proxyOrigin} (${status.proxy.status})\n`);
   output.write(`OPENAI_BASE_URL=${status.proxyOrigin}/v1\n`);
+  output.write(`ANTHROPIC_BASE_URL=${status.proxyOrigin}\n`);
 }
 
 async function waitForReady(
@@ -254,6 +261,12 @@ async function waitForStopped(
       if (!(error instanceof CorruptDaemonLockError)) {
         throw error;
       }
+      // A lock update uses an atomic rename. The stable-file read can
+      // deliberately reject the old descriptor while that rename is in
+      // progress; retry instead of treating the transient mismatch as proof
+      // that the daemon stopped.
+      await delay(10);
+      continue;
     }
     if (current === undefined || current.instanceId !== target.instanceId) {
       return;
@@ -421,61 +434,96 @@ async function commandRun(
   if (executable === undefined) {
     throw new CliUsageError("run requires '--' followed by a command.");
   }
+  const agent = resolveAgentIntegration(
+    stringFlag(parsed.flags, "agent"),
+    executable,
+  );
+  const defaultUpstream = defaultUpstreamForAgent(agent);
   const configuration = resolveStartConfiguration(
     parsed.flags,
     runtime.environment,
+    defaultUpstream === undefined ? {} : { upstreamOrigin: defaultUpstream },
   );
-  const { status } = await ensureDaemonReady(configuration, runtime);
+  const { status, alreadyRunning } = await ensureDaemonReady(
+    configuration,
+    runtime,
+  );
+  const hasPerRunUpstream =
+    stringFlag(parsed.flags, "upstream") !== undefined ||
+    runtime.environment.BLACKBOX_UPSTREAM_URL !== undefined ||
+    defaultUpstream !== undefined;
+  const sessionUpstreamOrigin = hasPerRunUpstream
+    ? configuration.proxy.upstream.origin
+    : (status.upstreamOrigin ??
+      (alreadyRunning ? undefined : configuration.proxy.upstream.origin));
   const cwd = resolve(stringFlag(parsed.flags, "cwd") ?? process.cwd());
   const sessionId = `session-run-${randomUUID()}`;
+  const sessionProxyOrigin = sessionScopedProxyOrigin(
+    status.proxyOrigin,
+    sessionId,
+  );
+  const launch = prepareAgentLaunch(
+    agent,
+    parsed.positionals.slice(1),
+    sessionProxyOrigin,
+  );
   const startedAt = runtime.now().toISOString();
   const storage = await openBlackBoxStorage({
     databasePath: configuration.paths.databasePath,
     dataDirectory: configuration.paths.dataDirectory,
     recoverIncompleteExchanges: false,
   });
-  const journal = new RunEventJournal(storage, {
-    schemaVersion: 1,
-    sessionId,
-    executable,
-    arguments: parsed.positionals.slice(1),
-    cwd,
-    startedAt,
-    configuration: {
-      ...DEFAULT_PROCESS_RUN_CONFIGURATION,
-      excludedPathSegments: [
-        ...DEFAULT_PROCESS_RUN_CONFIGURATION.excludedPathSegments,
-      ],
-      maxOutputFrameBytes: integerFlag(
-        parsed.flags,
-        "max-output-frame-bytes",
-        DEFAULT_PROCESS_RUN_CONFIGURATION.maxOutputFrameBytes,
-        1,
-        1024 * 1024,
-      ),
-      maxUntrackedFileBytes: integerFlag(
-        parsed.flags,
-        "max-untracked-file-bytes",
-        DEFAULT_PROCESS_RUN_CONFIGURATION.maxUntrackedFileBytes,
-        0,
-        1024 * 1024 * 1024,
-      ),
-      watcherDebounceMilliseconds: integerFlag(
-        parsed.flags,
-        "watcher-debounce-ms",
-        DEFAULT_PROCESS_RUN_CONFIGURATION.watcherDebounceMilliseconds,
-        1,
-        60_000,
-      ),
-      cleanupGraceMilliseconds: integerFlag(
-        parsed.flags,
-        "cleanup-timeout-ms",
-        DEFAULT_PROCESS_RUN_CONFIGURATION.cleanupGraceMilliseconds,
-        1,
-        120_000,
-      ),
+  const journal = new RunEventJournal(
+    storage,
+    {
+      schemaVersion: 1,
+      sessionId,
+      executable,
+      arguments: [...launch.arguments],
+      cwd,
+      startedAt,
+      configuration: {
+        ...DEFAULT_PROCESS_RUN_CONFIGURATION,
+        excludedPathSegments: [
+          ...DEFAULT_PROCESS_RUN_CONFIGURATION.excludedPathSegments,
+        ],
+        maxOutputFrameBytes: integerFlag(
+          parsed.flags,
+          "max-output-frame-bytes",
+          DEFAULT_PROCESS_RUN_CONFIGURATION.maxOutputFrameBytes,
+          1,
+          1024 * 1024,
+        ),
+        maxUntrackedFileBytes: integerFlag(
+          parsed.flags,
+          "max-untracked-file-bytes",
+          DEFAULT_PROCESS_RUN_CONFIGURATION.maxUntrackedFileBytes,
+          0,
+          1024 * 1024 * 1024,
+        ),
+        watcherDebounceMilliseconds: integerFlag(
+          parsed.flags,
+          "watcher-debounce-ms",
+          DEFAULT_PROCESS_RUN_CONFIGURATION.watcherDebounceMilliseconds,
+          1,
+          60_000,
+        ),
+        cleanupGraceMilliseconds: integerFlag(
+          parsed.flags,
+          "cleanup-timeout-ms",
+          DEFAULT_PROCESS_RUN_CONFIGURATION.cleanupGraceMilliseconds,
+          1,
+          120_000,
+        ),
+      },
     },
-  });
+    {
+      agentName: agent,
+      ...(sessionUpstreamOrigin === undefined
+        ? {}
+        : { upstreamOrigin: sessionUpstreamOrigin }),
+    },
+  );
   let recordingFailure: unknown;
   let workspaceObserver: WorkspaceObserver | undefined;
   let removeSignalForwarding: () => void = () => undefined;
@@ -518,14 +566,11 @@ async function commandRun(
   try {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(executable, parsed.positionals.slice(1), {
+      child = spawn(executable, launch.arguments, {
         cwd,
         env: {
           ...runtime.environment,
-          OPENAI_BASE_URL: sessionScopedProxyBaseUrl(
-            status.proxyOrigin,
-            sessionId,
-          ),
+          ...launch.environment,
           BLACKBOX_PROXY_ORIGIN: status.proxyOrigin,
           BLACKBOX_SESSION_ID: sessionId,
           BLACKBOX_CAPTURE_LEVEL: "wrapped-process",
@@ -1283,6 +1328,7 @@ export async function runCli(
 }
 
 export * from "./configuration.js";
+export * from "./agent-integration.js";
 export * from "./browser.js";
 export * from "./control-client.js";
 export * from "./daemon-launcher.js";

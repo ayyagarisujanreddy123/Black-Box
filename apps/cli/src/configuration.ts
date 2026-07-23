@@ -40,6 +40,10 @@ export interface ResolvedStartConfiguration {
   readonly readinessTimeoutMilliseconds: number;
 }
 
+export interface StartConfigurationDefaults {
+  readonly upstreamOrigin?: string;
+}
+
 const COMMANDS = new Set<CliCommand>([
   "init",
   "start",
@@ -103,6 +107,7 @@ const VALUE_FLAGS = new Set([
   "max-bytes",
   "older-than-days",
   "max-stored-bytes",
+  "agent",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -147,6 +152,7 @@ const ALLOWED_FLAGS: Record<CliCommand, ReadonlySet<string>> = {
   prune: new Set(["home", "older-than-days", "max-bytes", "yes", "json"]),
   run: new Set([
     ...START_FLAGS,
+    "agent",
     "cwd",
     "max-output-frame-bytes",
     "max-untracked-file-bytes",
@@ -305,12 +311,14 @@ export function pathsFromFlags(
 export function resolveStartConfiguration(
   flags: ReadonlyMap<string, string | true>,
   environment: NodeJS.ProcessEnv = process.env,
+  defaults: StartConfigurationDefaults = {},
 ): ResolvedStartConfiguration {
   const paths = pathsFromFlags(flags);
   const proxy = resolveProxyConfiguration({
     upstream:
       stringFlag(flags, "upstream") ??
       environment.BLACKBOX_UPSTREAM_URL ??
+      defaults.upstreamOrigin ??
       DEFAULT_UPSTREAM_ORIGIN,
     listenHost: stringFlag(flags, "proxy-host") ?? "127.0.0.1",
     listenPort: integerFlag(flags, "proxy-port", 4141, 0, 65_535),

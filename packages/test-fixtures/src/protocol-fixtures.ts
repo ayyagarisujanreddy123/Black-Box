@@ -5,6 +5,8 @@ export const REQUIRED_PROTOCOL_COVERAGE = [
   "responses-sse-text-and-function-arguments",
   "chat-completions-json",
   "chat-completions-sse-content-and-tool-deltas",
+  "anthropic-messages-json",
+  "anthropic-messages-sse-text-and-tool-deltas",
   "http-4xx-json-error",
   "mid-stream-disconnect",
   "malformed-sse-line",
@@ -23,6 +25,7 @@ export interface ProtocolFixture {
   readonly protocol:
     | "openai.responses"
     | "openai.chat-completions"
+    | "anthropic.messages"
     | "unknown-openai-compatible";
   readonly request: {
     readonly method: "POST";
@@ -183,6 +186,70 @@ const chatSseChunks = [
   "data: [DONE]\n\n",
 ];
 const chatSseBody = chatSseChunks.join("");
+
+const anthropicJsonRequest = JSON.stringify({
+  model: "claude-sonnet-4-6",
+  max_tokens: 1024,
+  system: "Stay within the repository.",
+  messages: [
+    { role: "user", content: "Inspect README.md." },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "tool_previous",
+          content: "Previous tool output",
+        },
+      ],
+    },
+  ],
+  tools: [{ name: "read_file", input_schema: { type: "object" } }],
+});
+const anthropicJsonResponse = JSON.stringify({
+  id: "msg_anthropic_json",
+  type: "message",
+  role: "assistant",
+  model: "claude-sonnet-4-6",
+  content: [
+    { type: "text", text: "I will inspect it." },
+    {
+      type: "tool_use",
+      id: "tool_anthropic_1",
+      name: "read_file",
+      input: { path: "README.md" },
+    },
+  ],
+  stop_reason: "tool_use",
+  stop_sequence: null,
+  usage: {
+    input_tokens: 14,
+    output_tokens: 9,
+    cache_read_input_tokens: 3,
+  },
+});
+
+const anthropicSseRequest = JSON.stringify({
+  model: "claude-sonnet-4-6",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Read package.json." }],
+  tools: [{ name: "read_file", input_schema: { type: "object" } }],
+  stream: true,
+});
+const anthropicSseChunks = [
+  'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_anthropic_stream","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":18,"output_tokens":1}}}\n\n',
+  'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+  'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I will "}}\n\n',
+  'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"inspect it."}}\n\n',
+  'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+  'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_anthropic_stream","name":"read_file","input":{}}}\n\n',
+  'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"package"}}\n\n',
+  'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":".json\\"}"}}\n\n',
+  'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+  'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":12}}\n\n',
+  'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+];
+const anthropicSseBody = anthropicSseChunks.join("");
 
 const errorRequest = JSON.stringify({ model: "missing-model", input: "Hello" });
 const errorResponse = JSON.stringify({
@@ -407,6 +474,92 @@ export const protocolFixtures: readonly ProtocolFixture[] = [
       event("chat-sse-content-tools", 5, "model.response.completed", {
         responseId: "chatcmpl_stream",
         finishReason: "tool_calls",
+      }),
+    ],
+  }),
+  defineFixture({
+    id: "anthropic-messages-json",
+    description:
+      "Anthropic Messages JSON text, tool use, tool result, and usage",
+    covers: ["anthropic-messages-json"],
+    protocol: "anthropic.messages",
+    path: "/v1/messages",
+    requestChunks: [anthropicJsonRequest],
+    expectedRequest: anthropicJsonRequest,
+    status: 200,
+    responseContentType: "application/json",
+    responseChunks: [anthropicJsonResponse],
+    expectedResponse: anthropicJsonResponse,
+    outcome: "completed",
+    expectedCanonicalEvents: [
+      event("anthropic-messages-json", 1, "tool.result", {
+        callId: "tool_previous",
+        output: "Previous tool output",
+      }),
+      event("anthropic-messages-json", 2, "model.request", {
+        endpoint: "/v1/messages",
+        model: "claude-sonnet-4-6",
+      }),
+      event("anthropic-messages-json", 3, "message.assistant", {
+        messageId: "msg_anthropic_json",
+        text: "I will inspect it.",
+      }),
+      event("anthropic-messages-json", 4, "tool.call", {
+        callId: "tool_anthropic_1",
+        name: "read_file",
+        arguments: { path: "README.md" },
+      }),
+      event("anthropic-messages-json", 5, "model.usage", {
+        inputTokens: 14,
+        outputTokens: 9,
+        totalTokens: 23,
+        cacheReadInputTokens: 3,
+      }),
+      event("anthropic-messages-json", 6, "model.response.completed", {
+        responseId: "msg_anthropic_json",
+        stopReason: "tool_use",
+      }),
+    ],
+  }),
+  defineFixture({
+    id: "anthropic-messages-sse",
+    description:
+      "Anthropic Messages SSE text and tool arguments assembled from deltas",
+    covers: ["anthropic-messages-sse-text-and-tool-deltas"],
+    protocol: "anthropic.messages",
+    path: "/v1/messages",
+    requestChunks: [anthropicSseRequest],
+    expectedRequest: anthropicSseRequest,
+    status: 200,
+    responseContentType: "text/event-stream",
+    responseChunks: anthropicSseChunks,
+    expectedResponse: anthropicSseBody,
+    outcome: "completed",
+    expectedCanonicalEvents: [
+      event("anthropic-messages-sse", 1, "model.request", {
+        endpoint: "/v1/messages",
+        model: "claude-sonnet-4-6",
+      }),
+      event("anthropic-messages-sse", 2, "model.response.started", {
+        responseId: "msg_anthropic_stream",
+      }),
+      event("anthropic-messages-sse", 3, "message.assistant", {
+        messageId: "msg_anthropic_stream",
+        text: "I will inspect it.",
+      }),
+      event("anthropic-messages-sse", 4, "tool.call", {
+        callId: "tool_anthropic_stream",
+        name: "read_file",
+        arguments: { path: "package.json" },
+      }),
+      event("anthropic-messages-sse", 5, "model.usage", {
+        inputTokens: 18,
+        outputTokens: 12,
+        totalTokens: 30,
+      }),
+      event("anthropic-messages-sse", 6, "model.response.completed", {
+        responseId: "msg_anthropic_stream",
+        stopReason: "tool_use",
       }),
     ],
   }),

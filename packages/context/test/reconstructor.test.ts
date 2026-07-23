@@ -56,7 +56,9 @@ class FixtureSource implements ContextEvidenceSource {
       path:
         input.protocol === "openai.chat-completions"
           ? "/v1/chat/completions"
-          : "/v1/responses",
+          : input.protocol === "anthropic.messages"
+            ? "/v1/messages"
+            : "/v1/responses",
       query: {},
       requestHeaders: { "content-type": ["application/json"] },
       requestBodyRef: {
@@ -175,6 +177,87 @@ class FixtureSource implements ContextEvidenceSource {
 }
 
 describe("client-visible context reconstruction", () => {
+  it("reconstructs an explicit Anthropic Messages request with tool results", async () => {
+    const source = new FixtureSource();
+    const request = source.addTurn({
+      id: "anthropic",
+      protocol: "anthropic.messages",
+      request: {
+        model: "claude-sonnet-4-6",
+        system: "Stay within the repository.",
+        messages: [
+          { role: "user", content: "Inspect README.md." },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-read",
+                name: "read_file",
+                input: { path: "README.md" },
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-read",
+                content: "README contents",
+              },
+              { type: "text", text: "Continue." },
+            ],
+          },
+        ],
+        tools: [
+          {
+            name: "read_file",
+            input_schema: { type: "object" },
+          },
+        ],
+        max_tokens: 1024,
+      },
+      responseId: "msg-anthropic",
+      reportedInputTokens: 42,
+    });
+
+    const result = await new ContextReconstructor(source).reconstruct(
+      request.id,
+    );
+
+    expect(result.completeness).toBe("exact-client-request");
+    expect(result.reportedInputTokens).toBe(42);
+    expect(result.items.map((item) => item.kind)).toEqual([
+      "instructions",
+      "message",
+      "tool-call",
+      "message",
+      "tool-result",
+      "tool-definition",
+      "settings",
+    ]);
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "tool-call",
+          summary: expect.objectContaining({
+            callId: "tool-read",
+            name: "read_file",
+            arguments: { path: "README.md" },
+          }),
+        }),
+        expect.objectContaining({
+          kind: "tool-result",
+          summary: expect.objectContaining({
+            callId: "tool-read",
+            output: "README contents",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("labels an explicit Chat Completions history as the exact client request", async () => {
     const source = new FixtureSource();
     const request = source.addTurn({

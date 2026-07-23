@@ -2,7 +2,7 @@
   "name": "@blackbox/normalizers",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenAI-compatible evidence normalization for Black Box",
+  "description": "OpenAI and Anthropic evidence normalization for Black Box",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

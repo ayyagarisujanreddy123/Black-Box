@@ -12,6 +12,7 @@ import type { AddressInfo } from "node:net";
 import { Transform } from "node:stream";
 
 import {
+  ANTHROPIC_MESSAGES_NORMALIZER_VERSION,
   CHAT_COMPLETIONS_NORMALIZER_VERSION,
   RESPONSES_NORMALIZER_VERSION,
   UNKNOWN_NORMALIZER_VERSION,
@@ -36,7 +37,9 @@ import {
 } from "../sessionization/sessionizer.js";
 import { BoundedByteCapture, CaptureMemoryBudget } from "./capture.js";
 import {
+  assertNoProxyLoop,
   resolveProxyConfiguration,
+  validateUpstreamOrigin,
   type ProxyConfiguration,
   type ProxyConfigurationInput,
 } from "./config.js";
@@ -114,6 +117,9 @@ function protocolForPath(path: string) {
   }
   if (path === "/v1/chat/completions") {
     return "openai.chat-completions" as const;
+  }
+  if (path === "/v1/messages") {
+    return "anthropic.messages" as const;
   }
   return "unknown-openai-compatible" as const;
 }
@@ -291,6 +297,34 @@ export class RecorderProxy {
     };
   }
 
+  private upstreamForSession(sessionId: string): URL {
+    const session = this.options.storage.sessions.get(sessionId);
+    if (session?.status !== "active" || session.upstreamOrigin === undefined) {
+      return this.configuration.upstream;
+    }
+    const upstream = validateUpstreamOrigin(session.upstreamOrigin);
+    assertNoProxyLoop(
+      this.addressValue?.host ?? this.configuration.listenHost,
+      this.addressValue?.port ?? this.configuration.listenPort,
+      upstream,
+    );
+    return upstream;
+  }
+
+  private routeTargetForSession(
+    target: RequestTarget,
+    sessionId: string,
+  ): RequestTarget {
+    const upstream = this.upstreamForSession(sessionId);
+    return {
+      ...target,
+      upstreamUrl: new URL(
+        `${target.upstreamUrl.pathname}${target.upstreamUrl.search}`,
+        upstream,
+      ),
+    };
+  }
+
   async flush(): Promise<void> {
     await Promise.all([...this.pendingJournals]);
   }
@@ -434,6 +468,7 @@ export class RecorderProxy {
             normalizerVersions: {
               "openai.responses": RESPONSES_NORMALIZER_VERSION,
               "openai.chat-completions": CHAT_COMPLETIONS_NORMALIZER_VERSION,
+              "anthropic.messages": ANTHROPIC_MESSAGES_NORMALIZER_VERSION,
               "unknown-openai-compatible": UNKNOWN_NORMALIZER_VERSION,
             },
           },
@@ -515,6 +550,9 @@ export class RecorderProxy {
     let target: RequestTarget;
     try {
       target = parseRequestTarget(request.url, this.configuration.upstream);
+      if (target.sessionId !== undefined) {
+        target = this.routeTargetForSession(target, target.sessionId);
+      }
     } catch {
       this.healthState.activeRequests -= 1;
       this.healthState.requestsCompleted += 1;

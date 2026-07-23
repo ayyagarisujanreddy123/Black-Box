@@ -7,7 +7,7 @@ export interface SessionScopedPath {
   readonly path: string;
 }
 
-export function sessionScopedProxyBaseUrl(
+export function sessionScopedProxyOrigin(
   proxyOrigin: string,
   sessionId: string,
 ): string {
@@ -23,9 +23,16 @@ export function sessionScopedProxyBaseUrl(
   }
   const validated = IdentifierSchema.parse(sessionId);
   const encoded = Buffer.from(validated, "utf8").toString("base64url");
-  return new URL(`${SESSION_ROUTE_PREFIX}${encoded}/v1`, origin)
+  return new URL(`${SESSION_ROUTE_PREFIX}${encoded}/`, origin)
     .toString()
     .replace(/\/$/u, "");
+}
+
+export function sessionScopedProxyBaseUrl(
+  proxyOrigin: string,
+  sessionId: string,
+): string {
+  return `${sessionScopedProxyOrigin(proxyOrigin, sessionId)}/v1`;
 }
 
 export function parseSessionScopedPath(

@@ -1,3 +1,4 @@
+import { AnthropicMessagesNormalizer } from "./anthropic-messages.js";
 import { ChatCompletionsNormalizer } from "./chat-completions.js";
 import {
   NormalizationExchangeSchema,
@@ -36,7 +37,12 @@ export class DefaultNormalizerRegistry extends NormalizerRegistry {
   constructor() {
     const unknown = new UnknownExchangeNormalizer();
     super(
-      [new ResponsesNormalizer(), new ChatCompletionsNormalizer(), unknown],
+      [
+        new ResponsesNormalizer(),
+        new ChatCompletionsNormalizer(),
+        new AnthropicMessagesNormalizer(),
+        unknown,
+      ],
       unknown,
     );
   }

@@ -18,6 +18,7 @@ const NEVER_PERSIST_HEADERS = new Set([
   "proxy-authenticate",
   "proxy-authorization",
   "set-cookie",
+  "x-api-key",
 ]);
 
 function connectionTokens(headers: IncomingHttpHeaders): Set<string> {

@@ -64,6 +64,11 @@ export interface WorkspaceFileChangeEvidence {
   readonly mediaType?: string;
 }
 
+export interface RunSessionOptions {
+  readonly agentName?: string;
+  readonly upstreamOrigin?: string;
+}
+
 interface EventOptions {
   readonly payloadRef?: BlackBoxEvent["payloadRef"];
   readonly source?: EvidenceSource;
@@ -102,6 +107,7 @@ export class RunEventJournal {
   constructor(
     private readonly storage: BlackBoxStorage,
     input: ProcessObservationIdentity,
+    sessionOptions: RunSessionOptions = {},
   ) {
     this.identity = ProcessObservationIdentitySchema.parse(input);
     this.storage.transaction(() => {
@@ -117,6 +123,12 @@ export class RunEventJournal {
             arguments: this.identity.arguments,
             cwd: this.identity.cwd,
           },
+          ...(sessionOptions.agentName === undefined
+            ? {}
+            : { agentName: sessionOptions.agentName }),
+          ...(sessionOptions.upstreamOrigin === undefined
+            ? {}
+            : { upstreamOrigin: sessionOptions.upstreamOrigin }),
           models: [],
           tags: [],
           counts: {
@@ -128,6 +140,9 @@ export class RunEventJournal {
           metadata: {
             internalAnalysis: false,
             sessionization: { source: "explicit-wrapper" },
+            ...(sessionOptions.agentName === undefined
+              ? {}
+              : { agentIntegration: sessionOptions.agentName }),
             processCaptureConfiguration: this.identity.configuration,
           },
         }),

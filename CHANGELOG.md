@@ -6,7 +6,11 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 
 ### Added
 
-- Byte-faithful localhost proxy capture for supported OpenAI Responses and Chat Completions JSON/SSE traffic.
+- Byte-faithful localhost proxy capture for supported OpenAI Responses, OpenAI
+  Chat Completions, and Anthropic Messages JSON/SSE traffic.
+- Native `blackbox run` launch integration for Codex and Claude Code, including
+  auto-detection, explicit `--agent` selection, one-run client configuration,
+  and validated per-session upstream routing through a shared daemon.
 - Crash-safe SQLite evidence journal, content-addressed blob storage, recovery, migrations, quotas, retention, and explicit garbage collection.
 - `blackbox run` process capture with bounded output, signal forwarding, workspace baselines, live observations, and authoritative final file evidence.
 - Authenticated local browser cockpit with session navigation, virtualized timeline, evidence inspection, context reconstruction, search, and live updates.
@@ -18,7 +22,9 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 
 ### Security and privacy
 
-- Sensitive authorization and cookie headers are excluded from persisted evidence.
+- Sensitive authorization, `x-api-key`, and cookie headers are excluded from
+  persisted evidence; existing stores are migrated to scrub historically
+  retained Anthropic API-key header fields.
 - Control and cockpit services default to loopback with token and origin checks.
 - Recorded markup remains inert, optional external analysis is disabled by default, and imported evidence cannot trigger analysis or replay.
 - Apache-2.0 licensing and generated third-party notices are included in future runtime package contents.
@@ -36,7 +42,8 @@ This file records user-visible changes to Black Box. Version 0.1.0 remains an un
 
 ### Known limitations
 
-- Responses WebSocket/Realtime and non-OpenAI provider protocols are not supported.
+- Responses WebSocket/Realtime, native Bedrock and Vertex transports, and
+  path-bearing upstream gateways are not supported.
 - Agent-specific adapters are not bundled.
 - Black Box observes configured API, wrapped-process, and repository boundaries; it is not an operating-system sandbox or universal activity monitor.
 - npm publication, signed tagging, and registry installation verification are deferred.

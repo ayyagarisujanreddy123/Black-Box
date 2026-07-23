@@ -18,6 +18,7 @@ export const DaemonStatusSchema = z
     startedAt: z.iso.datetime({ offset: true }),
     proxyOrigin: z.url(),
     controlOrigin: z.url(),
+    upstreamOrigin: z.url().optional(),
     proxy: z
       .object({
         status: z.enum(["healthy", "degraded"]),

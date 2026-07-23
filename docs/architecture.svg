@@ -21,7 +21,7 @@
 
   <rect class="panel" x="42" y="104" width="240" height="112" />
   <text class="label" x="162" y="145" text-anchor="middle">AGENT / CLIENT</text>
-  <text class="copy" x="162" y="176" text-anchor="middle">OpenAI-compatible HTTP</text>
+  <text class="copy" x="162" y="176" text-anchor="middle">OpenAI / Anthropic HTTP</text>
   <text class="copy" x="162" y="199" text-anchor="middle">session-scoped base URL</text>
 
   <rect class="core" x="365" y="92" width="280" height="136" />
